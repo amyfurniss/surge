@@ -4,6 +4,7 @@
 #include "DebugHelpers.h"
 
 #include "filters/RKMoog.h"
+#include "filters/StepLadder.h"
 
 __m128 SVFLP12Aquad(QuadFilterUnitState* __restrict f, __m128 in)
 {
@@ -785,6 +786,8 @@ FilterUnitQFPtr GetQFPtrFilterUnit(int type, int subtype)
 #if SURGE_EXTRA_FILTERS      
    case fut_rkmoog:
       return RKMoog::process;
+   case fut_stepladder:
+      return StepLadder::process;
 #endif      
    }
    return 0;

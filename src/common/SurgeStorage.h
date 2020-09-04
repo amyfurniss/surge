@@ -283,6 +283,7 @@ enum fu_type
    fut_SNH,
 #if SURGE_EXTRA_FILTERS
    fut_rkmoog,
+   fut_stepladder,
 #endif   
    n_fu_type,
 };
@@ -290,7 +291,7 @@ const char fut_names[n_fu_type][32] = {
     "Off",           "Lowpass 12 dB/oct",  "Lowpass 24 dB/oct", "Ladder Lowpass",
     "Highpass 12 dB/oct", "Highpass 24 dB/oct", "Bandpass",     "Notch",   "Comb", "Sample & Hold"
 #if SURGE_EXTRA_FILTERS    
-    , "Moog Ladder Runge Kutta"
+    , "Moog Ladder Runge Kutta", "StepLadder"
 #endif    
 };
 

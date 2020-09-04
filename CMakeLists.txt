@@ -182,6 +182,7 @@ set(SURGE_COMMON_SOURCES
   src/common/dsp/effect/RotarySpeakerEffect.cpp
   src/common/dsp/effect/VocoderEffect.cpp
   src/common/dsp/filters/RKMoog.cpp
+  src/common/dsp/filters/StepLadder.cpp
   src/common/dsp/AdsrEnvelope.cpp
   src/common/dsp/BiquadFilter.cpp
   src/common/dsp/BiquadFilterSSE2.cpp

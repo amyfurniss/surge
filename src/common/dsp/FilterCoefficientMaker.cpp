@@ -3,6 +3,7 @@
 #include <vt_dsp/basic_dsp.h>
 
 #include "filters/RKMoog.h"
+#include "filters/StepLadder.h"
 
 using namespace std;
 
@@ -66,6 +67,9 @@ void FilterCoefficientMaker::MakeCoeffs(
 #if SURGE_EXTRA_FILTERS      
    case fut_rkmoog:
       RKMoog::makeCoefficients(this, Freq, Reso, SubType, storageI);
+      break;
+   case fut_stepladder:
+      StepLadder::makeCoefficients(this, Freq, Reso, SubType, storageI);
       break;
 #endif      
    };
