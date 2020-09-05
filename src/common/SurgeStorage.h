@@ -304,12 +304,13 @@ const char fut_ldr_subtypes[4][32] = {"6 dB/oct", "12 dB/oct", "18 dB/oct", "24 
 
 const int fut_subcount[n_fu_type] = {0, 3, 3, 4, 3, 3, 6, 4, 4, 0
 #if SURGE_EXTRA_FILTERS                                     
-                                     , 3
+                                     , 3, 4
 #endif
 };
 
 #if SURGE_EXTRA_FILTERS
 const char fut_rkmoog_subtypes[3][32] = { "Low Saturation", "Medium Saturation", "High Saturation" };
+const char fut_stepladder_subtypes[4][32] = { "1 Pole", "2 Poles", "3 Poles" "4 Poles" };
 #endif
 
 enum fu_subtype
