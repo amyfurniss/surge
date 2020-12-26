@@ -18,7 +18,7 @@
 #include <time.h>
 #include <vt_dsp/vt_dsp_endian.h>
 
-#include "ImportFilesystem.h"
+#include "filesystem/import.h"
 
 #include <fstream>
 #include <iterator>
@@ -276,18 +276,53 @@ bool SurgeSynthesizer::loadPatchByPath( const char* fxpPath, int categoryId, con
    return true;
 }
 
+void SurgeSynthesizer::enqueuePatchForLoad(void* data, int size)
+{
+   {
+      std::lock_guard<std::mutex> g(rawLoadQueueMutex);
+
+      if( enqueuedLoadData ) // this means we missed one because we only free under the lock
+         free(enqueuedLoadData);
+
+      enqueuedLoadData = data;
+      enqueuedLoadSize = size;
+      rawLoadEnqueued = true;
+      rawLoadNeedsUIDawExtraState = false;
+   }
+}
+
+void SurgeSynthesizer::processEnqueuedPatchIfNeeded()
+{
+   bool expected = true;
+   void *freeThis = nullptr;
+   if( rawLoadEnqueued.compare_exchange_weak(expected,true) && expected )
+   {
+      std::lock_guard<std::mutex> g(rawLoadQueueMutex);
+      rawLoadEnqueued = false;
+      loadRaw( enqueuedLoadData, enqueuedLoadSize );
+      loadFromDawExtraState();
+
+      freeThis = enqueuedLoadData;
+      enqueuedLoadData = nullptr;
+      rawLoadNeedsUIDawExtraState = true;
+   }
+   if( freeThis )
+      free( freeThis ); // do this outside the lock
+}
+
+
 void SurgeSynthesizer::loadRaw(const void* data, int size, bool preset)
 {
    halt_engine = true;
    allNotesOff();
-   for (int s = 0; s < 2; s++)
+   for (int s = 0; s < n_scenes; s++)
       for (int i = 0; i < n_customcontrollers; i++)
          storage.getPatch().scene[s].modsources[ms_ctrl1 + i]->reset();
 
    storage.getPatch().init_default_values();
    storage.getPatch().load_patch(data, size, preset);
    storage.getPatch().update_controls(false, nullptr, true);
-   for (int i = 0; i < 8; i++)
+   for (int i = 0; i < n_fx_slots; i++)
    {
       memcpy((void*)&fxsync[i], (void*)&storage.getPatch().fx[i], sizeof(FxStorage));
       fx_reload[i] = true;
@@ -295,10 +330,10 @@ void SurgeSynthesizer::loadRaw(const void* data, int size, bool preset)
 
    loadFx(false, true);
 
-   setParameter01(storage.getPatch().scene[0].f2_cutoff_is_offset.id,
-                  storage.getPatch().scene[0].f2_cutoff_is_offset.get_value_f01());
-   setParameter01(storage.getPatch().scene[1].f2_cutoff_is_offset.id,
-                  storage.getPatch().scene[1].f2_cutoff_is_offset.get_value_f01());
+   for (int sc = 0; sc < n_scenes; sc++)
+   {
+      setParameter01(storage.getPatch().scene[sc].f2_cutoff_is_offset.id, storage.getPatch().scene[sc].f2_cutoff_is_offset.get_value_f01());
+   }
 
    halt_engine = false;
    patch_loaded = true;
@@ -378,21 +413,26 @@ void SurgeSynthesizer::savePatch()
    fs::path filename = savepath;
    filename /= string_to_path(legalname + ".fxp");
 
-   if (fs::exists(filename))
-   {
-       if( Surge::UserInteractions::promptOKCancel(std::string( "The patch '" + storage.getPatch().name + "' already exists in '" + storage.getPatch().category
-                                                                + "'. Are you sure you want to overwrite it?" ),
-                                                   std::string( "Overwrite patch" )) ==
-           Surge::UserInteractions::CANCEL )
-           return;
-   }
-
-#if WINDOWS && TARGET_RACK
-   std::ofstream f(filename.c_str(), std::ios::out | std::ios::binary);
-#else
-   std::ofstream f(filename, std::ios::out | std::ios::binary);
+   bool checkExists = true;
+#if LINUX
+   // Overwrite prompt hangs UI in Bitwig 3.3
+   checkExists = (hostProgram.find("bitwig") != std::string::npos);
 #endif
+   if (checkExists && fs::exists(filename))
+   {
+      if (Surge::UserInteractions::promptOKCancel(
+              std::string("The patch '" + storage.getPatch().name + "' already exists in '" +
+                          storage.getPatch().category +
+                          "'. Are you sure you want to overwrite it?"),
+              std::string("Overwrite patch")) == Surge::UserInteractions::CANCEL)
+         return;
+   }
+   savePatchToPath(filename);
+}
 
+void SurgeSynthesizer::savePatchToPath(fs::path filename)
+{
+   std::ofstream f(filename, std::ios::out | std::ios::binary);
    if (!f)
       return;
 

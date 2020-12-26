@@ -15,7 +15,6 @@
 
 #pragma once
 
-#define _USE_MATH_DEFINES
 #include <math.h>
 #include <stdio.h>
 #include <assert.h>
@@ -23,7 +22,14 @@
 
 #if MAC
 #include "vt_dsp/macspecific.h"
+
+#if defined(__x86_64__)
+#else
+#define ARM_NEON 1
 #endif
+
+#endif
+
 #if ARM_NEON
 #define SIMDE_ENABLE_NATIVE_ALIASES
 #include "simde/x86/sse2.h"
@@ -44,7 +50,7 @@ static inline int _stricmp(const char *s1, const char *s2)
 }
 #endif
 
-#if WINDOWS && !TARGET_RACK
+#if WINDOWS
 FILE* surge_win_fopen_utf8(const char* pathname, const char* mode);
 #define fopen(pathname, mode) surge_win_fopen_utf8((pathname), (mode))
 #endif

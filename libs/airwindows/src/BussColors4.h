@@ -8,7 +8,7 @@
 #define __BussColors4_H
 
 #ifndef __audioeffect__
-#include "audioeffect_airwinstub.h"
+#include "airwindows/AirWinBaseClass.h"
 #endif
 
 #include <set>
@@ -54,8 +54,8 @@ public:
     virtual void getParameterDisplay(VstInt32 index, char *text); // text description of the current value    
     virtual VstInt32 canDo(char *text);
 
-
-   virtual bool isParameterIntegral(VstInt32 index);
+    void getIntegralDisplayForValue(VstInt32 index, float value, char* txt);
+    virtual bool isParameterIntegral(VstInt32 index);
    virtual int parameterIntegralUpperBound( VstInt32 index );
 private:
     char _programName[kVstMaxProgNameLen + 1];

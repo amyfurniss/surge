@@ -8,7 +8,7 @@
 #define __VoiceOfTheStarship_H
 
 #ifndef __audioeffect__
-#include "audioeffect_airwinstub.h"
+#include "airwindows/AirWinBaseClass.h"
 #endif
 
 #include <set>
@@ -51,7 +51,10 @@ public:
     virtual void getParameterName(VstInt32 index, char *text);    // name of the parameter
     virtual void getParameterDisplay(VstInt32 index, char *text); // text description of the current value    
     virtual VstInt32 canDo(char *text);
-private:
+    bool isParameterIntegral(VstInt32 index);
+    int parameterIntegralUpperBound(VstInt32 index);
+
+ private:
     char _programName[kVstMaxProgNameLen + 1];
     std::set< std::string > _canDo;
 	

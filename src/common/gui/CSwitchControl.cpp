@@ -63,7 +63,13 @@ void CSwitchControl::setValue(float f)
 
 CMouseEventResult CSwitchControl::onMouseDown(CPoint& where, const CButtonState& buttons)
 {
-   if (listener && buttons & (kAlt | kShift | kControl | kApple))
+   if (listener && (buttons & (kMButton | kButton4 | kButton5)))
+   {
+      listener->controlModifierClicked(this, buttons);
+      return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+   }
+
+   if (listener && ( buttons & (kAlt | kShift | kControl | kApple) || unValueClickable ))
    {
       if (listener->controlModifierClicked(this, buttons) != 0)
          return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
@@ -72,7 +78,9 @@ CMouseEventResult CSwitchControl::onMouseDown(CPoint& where, const CButtonState&
    if (!(buttons & kLButton))
       return kMouseEventNotHandled;
 
-   beginEdit();
+   if( unValueClickable )
+      return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+
 
    if (is_itype)
    {
@@ -83,7 +91,9 @@ CMouseEventResult CSwitchControl::onMouseDown(CPoint& where, const CButtonState&
       down = !down;
       value = down ? 1 : 0;
    }
+   beginEdit();
 
+   value_direction = 1;
    if (listener)
       listener->valueChanged(this);
 
@@ -100,6 +110,43 @@ CMouseEventResult CSwitchControl::onMouseUp(CPoint& where, const CButtonState& b
 CMouseEventResult CSwitchControl::onMouseMoved(CPoint& where, const CButtonState& buttons)
 {
    return kMouseEventHandled;
+}
+bool CSwitchControl::onWheel(const CPoint& where,
+                             const float& distance,
+                             const CButtonState& buttons)
+{
+   if( ! is_itype ) return false;
+   if( imax == 0 ) return false;
+
+   wheelDistance += distance;
+
+   float threshold = 1;
+#if WINDOWS
+   threshold = 0.333333;
+#endif
+
+   if( wheelDistance > threshold )
+   {
+      wheelDistance = 0;
+      ivalue ++;
+      if( ivalue >= imax )
+         ivalue = 0;
+      value_direction = +1;
+      if (listener)
+         listener->valueChanged(this);
+
+   }
+   else if( wheelDistance < -threshold )
+   {
+      wheelDistance = 0;
+      ivalue--;
+      if( ivalue < 0 )
+         ivalue = imax;
+      value_direction = -1;
+      if (listener)
+         listener->valueChanged(this);
+   }
+   return true;
 }
 /*
 void gui_switch::mouse (CPoint &where, long button)

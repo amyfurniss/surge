@@ -14,7 +14,6 @@
 */
 
 #include "CNumberField.h"
-#include "Colors.h"
 #include "SurgeStorage.h"
 #include "UserDefaults.h"
 #include <string>
@@ -23,6 +22,7 @@
 #include <iostream>
 #include "SkinColors.h"
 #include "CScalableBitmap.h"
+#include "Parameter.h"
 
 using namespace VSTGUI;
 
@@ -78,7 +78,8 @@ CNumberField::CNumberField(const CRect& size,
                            long tag,
                            CBitmap* pBackground,
                            SurgeStorage* storage)
-    : CControl(size, listener, tag, pBackground)
+    : CControl(size, listener, tag, pBackground),
+      Surge::UI::CursorControlAdapter<CNumberField>( storage )
 {
    i_value = 60;
    controlmode = cm_integer;
@@ -237,6 +238,15 @@ void CNumberField::setControlMode(int mode)
       setIntMax(1);
       setIntDefaultValue(0);
       break;
+   case cm_mseg_snap_h:
+   case cm_mseg_snap_v:
+      setIntMin(1);
+      setIntMax(100);
+      if (mode == cm_mseg_snap_h)
+         setIntDefaultValue(10);
+      else
+         setIntDefaultValue(4);
+      break;
    default:
       setFloatMin(0.f);
       setFloatMax(1.f);
@@ -250,42 +260,41 @@ void CNumberField::setControlMode(int mode)
 void CNumberField::setValue(float val)
 {
    CControl::setValue(val);
-   i_value = (int)((1 / 0.99) * (val - 0.005) * (float)(i_max - i_min) + 0.5) + i_min;
+   i_value = Parameter::intUnscaledFromFloat(val, i_max, i_min );
    setDirty();
 }
 
 //------------------------------------------------------------------------
 void CNumberField::draw(CDrawContext* pContext)
 {
-   auto colorName = skin->propertyValue(skinControl, "text_color", Colors::NumberField::DefaultText.name );
-   auto hoverColorName = skin->propertyValue(skinControl, "text_color.hover", Colors::NumberField::DefaultHoverText.name );
+   auto colorName = skin->propertyValue(skinControl, "text_color", Colors::NumberField::Text.name);
+   auto hoverColorName = skin->propertyValue(skinControl, "text_color.hover", Colors::NumberField::TextHover.name );
 
    auto fontColor = kRedCColor;
-   if( hovered )
-   {
+   if (hovered)
       fontColor = skin->getColor(hoverColorName );
-   }
    else
-   {
       fontColor = skin->getColor(colorName );
-   }
 
    // cache this of course
-   if( ! triedToLoadBg )
+   if (!triedToLoadBg)
    {
       bg = skin->backgroundBitmapForControl(skinControl, associatedBitmapStore);
       hoverBg = skin->hoverBitmapOverlayForBackgroundBitmap(skinControl, bg, associatedBitmapStore, Surge::UI::Skin::HOVER );
       triedToLoadBg = true;
    }
-   if( hovered && hoverBg )
-   {
-      hoverBg->draw( pContext, getViewSize(), CPoint(), 0xff );
-   }
-   else if( bg )
+
+   if (bg)
    {
       bg->draw( pContext, getViewSize(), CPoint(), 0xff );
    }
-   else
+   
+   if (hovered && hoverBg)
+   {
+      hoverBg->draw( pContext, getViewSize(), CPoint(), 0xff );
+   }
+
+   if (!(bg || hoverBg))
    {
       pContext->setFrameColor(kRedCColor);
       pContext->setFillColor(VSTGUI::CColor(100, 100, 200));
@@ -483,6 +492,10 @@ void CNumberField::draw(CDrawContext* pContext)
       else
          sprintf(the_text, "no");
       break;
+   case cm_mseg_snap_h:
+   case cm_mseg_snap_v:
+      sprintf( the_text, "%i", i_value );
+      break;
    case cm_none:
       sprintf(the_text, "-");
       break;
@@ -566,7 +579,7 @@ CMouseEventResult CNumberField::onMouseDown(CPoint& where, const CButtonState& b
    if (buttons & kDoubleClick)
    {
       if (listener)
-         listener->controlModifierClicked(this, kControl);
+         listener->controlModifierClicked(this, buttons);
       {
          setDirty();
          return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
@@ -575,8 +588,10 @@ CMouseEventResult CNumberField::onMouseDown(CPoint& where, const CButtonState& b
 
    if ((buttons & kLButton) && (drawsize.pointInside(where)))
    {
+      enqueueCursorHide = true;
       controlstate = cs_drag;
       lastmousepos = where;
+      startmousepos = where;
       f_min = 0.f;
       f_max = 1.f;
       value = ((float)(i_value - i_min)) / ((float)(i_max - i_min));
@@ -588,9 +603,11 @@ CMouseEventResult CNumberField::onMouseDown(CPoint& where, const CButtonState& b
 }
 CMouseEventResult CNumberField::onMouseUp(CPoint& where, const CButtonState& buttons)
 {
+   enqueueCursorHide = false;
    if (controlstate)
    {
       endEdit();
+      endCursorHide();
       controlstate = cs_null;
    }
    return kMouseEventHandled;
@@ -599,12 +616,31 @@ CMouseEventResult CNumberField::onMouseMoved(CPoint& where, const CButtonState& 
 {
    if ((controlstate == cs_drag) && (buttons & kLButton))
    {
+      if( enqueueCursorHide )
+      {
+         startCursorHide(where);
+         enqueueCursorHide = false;
+      }
       float dx = where.x - lastmousepos.x;
       float dy = where.y - lastmousepos.y;
       
       float delta = dx - dy; // for now lets try this. Remenber y 'up' in logical space is 'down' in pixel space
-      
-      lastmousepos = where;
+
+      float odx = where.x - startmousepos.x;
+      float ody = where.y - startmousepos.y;
+      float odelt = sqrt( odx * odx + ody * ody );
+
+      if( odelt > 10 )
+      {
+         if (resetToShowLocation())
+            lastmousepos = startmousepos;
+         else
+            lastmousepos = where;
+      }
+      else
+      {
+         lastmousepos = where;
+      }
 
       if (buttons & kShift)
          delta *= 0.1;
@@ -618,14 +654,11 @@ CMouseEventResult CNumberField::onMouseMoved(CPoint& where, const CButtonState& 
       }
       
       value += delta * 0.01;
-      // i_value = i_min + (int)(value*((float)(i_max - i_min)));
-      i_value = (int)((1.f / 0.99f) * (value - 0.005f) * (float)(i_max - i_min) + 0.5) + i_min;
+      i_value = Parameter::intUnscaledFromFloat(value, i_max, i_min );
 
-      
       bounceValue();
-      // invalid();
-      // setDirty();
-      if (isDirty() && listener)
+      invalid();
+      if (listener)
          listener->valueChanged(this);
    }
    return kMouseEventHandled;
@@ -645,7 +678,7 @@ bool CNumberField::onWheel(const CPoint& where, const float& distance, const CBu
       value += distance / (i_max - i_min) * mouseFactor;
    
 
-   i_value = (int)((1.f / 0.99f) * (value - 0.005f) * (float)(i_max - i_min) + 0.5) + i_min;
+   i_value = Parameter::intUnscaledFromFloat(value, i_max, i_min );
    bounceValue();
    invalid();
    setDirty();

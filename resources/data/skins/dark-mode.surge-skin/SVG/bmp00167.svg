@@ -1,18 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?>
-<svg width="133px" height="18px" viewBox="0 0 133 18" version="1.1" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg">
-  <desc>Created with Lunacy</desc>
-  <defs>
-    <linearGradient x1="0.5" y1="0" x2="0.5" y2="1" id="gradient_1">
-      <stop offset="0" stop-color="#434343" />
-      <stop offset="1" stop-color="#303030" />
-    </linearGradient>
-    <rect width="133" height="18" id="artboard_1" />
-    <clipPath id="clip_1">
-      <use xlink:href="#artboard_1" clip-rule="evenodd" />
-    </clipPath>
-  </defs>
-  <g id="bmp00167" clip-path="url(#clip_1)">
-    <path d="M0 4L0 2C0 1.44772 0.195262 0.976311 0.585786 0.585786C0.976311 0.195262 1.44772 0 2 0L126 0C126.552 0 127.024 0.195262 127.414 0.585786C127.805 0.976311 128 1.44772 128 2L128 12C128 12.5523 127.805 13.0237 127.414 13.4142C127.024 13.8047 126.552 14 126 14L2 14C1.44772 14 0.976311 13.8047 0.585786 13.4142C0.195262 13.0237 0 12.5523 0 12L0 4L0 4L0 4Z" transform="translate(2.499939 2)" id="Rectangle#45" fill="url(#gradient_1)" stroke="#0F0F0F" stroke-width="1" />
-    <path d="M2.25091 0L4.501 3.761L0 3.761L2.25091 0L2.25091 0Z" transform="matrix(0.507381 -0.861722 0.861722 0.507381 120.86177 9.091766)" id="Shape" fill="#B4B4B4" stroke="none" />
-  </g>
+<svg width="133" height="18" viewBox="0 0 133 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M2 3.5C2 2.39543 2.89543 1.5 4 1.5H128C129.105 1.5 130 2.39543 130 3.5V14.5C130 15.6046 129.105 16.5 128 16.5H4C2.89543 16.5 2 15.6046 2 14.5V3.5Z" fill="url(#paint0_linear)"/>
+<path d="M4 2H128V1H4V2ZM129.5 3.5V14.5H130.5V3.5H129.5ZM128 16H4V17H128V16ZM2.5 14.5V3.5H1.5V14.5H2.5ZM4 16C3.17157 16 2.5 15.3284 2.5 14.5H1.5C1.5 15.8807 2.61929 17 4 17V16ZM129.5 14.5C129.5 15.3284 128.828 16 128 16V17C129.381 17 130.5 15.8807 130.5 14.5H129.5ZM128 2C128.828 2 129.5 2.67157 129.5 3.5H130.5C130.5 2.11929 129.381 1 128 1V2ZM4 1C2.61929 1 1.5 2.11929 1.5 3.5H2.5C2.5 2.67157 3.17157 2 4 2V1Z" fill="black"/>
+<path d="M123.5 11L121 8L126 8L123.5 11Z" fill="#E3E3E3"/>
+<defs>
+<linearGradient id="paint0_linear" x1="66" y1="1.5" x2="66" y2="16.5" gradientUnits="userSpaceOnUse">
+<stop stop-color="#434343"/>
+<stop offset="1" stop-color="#303030"/>
+</linearGradient>
+</defs>
 </svg>

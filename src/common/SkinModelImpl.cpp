@@ -21,6 +21,7 @@
 #include <cstring>
 #include "resource.h"
 #include "SkinColors.h"
+#include "strnatcmp.h"
 
 /*
  * This file implements the innards of the Connector class and the SkinColor class
@@ -118,29 +119,29 @@ Connector & Connector::asMixerSolo() noexcept
    payload->defaultComponent = Connector::SWITCH;
    payload->w = 22;
    payload->h = 15;
-   return withBackground(IDB_SWITCH_SOLO);
+   return withBackground(IDB_MIXER_SOLO);
 }
 Connector & Connector::asMixerMute() noexcept
 {
    payload->defaultComponent = Connector::SWITCH;
    payload->w = 22;
    payload->h = 15;
-   return withBackground(IDB_SWITCH_MUTE);
+   return withBackground(IDB_MIXER_MUTE);
 }
 Connector & Connector::asMixerRoute() noexcept
 {
    payload->defaultComponent = Connector::HSWITCH2;
    payload->w = 22;
    payload->h = 15;
-   return withHSwitch2Properties(IDB_OSCROUTE, 3, 1, 3);
+   return withHSwitch2Properties(IDB_MIXER_OSC_ROUTING, 3, 1, 3);
 }
 
 Connector & Connector::asJogPlusMinus() noexcept
 {
    payload->defaultComponent = Connector::HSWITCH2;
-   payload->w = 37;
+   payload->w = 32;
    payload->h = 12;
-   return withHSwitch2Properties(IDB_BUTTON_MINUSPLUS, 2, 1, 2);
+   return withHSwitch2Properties(IDB_PREVNEXT_JOG, 2, 1, 2);
 }
 
 
@@ -159,6 +160,19 @@ Connector Connector::connectorByNonParameterConnection(NonParameterConnection n)
    if( npcMap->find(n) != npcMap->end() )
       c.payload = npcMap->at(n);
    return c;
+}
+
+
+std::vector<Connector> Connector::connectorsByComponentType( Connector::Component c )
+{
+   auto res = std::vector<Connector>();
+   guaranteeMap();
+   for( auto it : *idmap )
+   {
+      if (it.second->defaultComponent == c)
+         res.push_back(Connector(it.second));
+   }
+   return res;
 }
 
 Color::Color( std::string name, int r, int g, int b ) : name(name), r(r), g(g), b(b), a(255) {
@@ -185,6 +199,20 @@ std::vector<Color> Color::getAllColors()
    for( auto c : *colMap )
       res.push_back(c.second);
    std::sort( res.begin(), res.end(), [](const Color &a, const Color &b ) { return strcmp( a.name.c_str(), b.name.c_str() ) < 0;});
+   return res;
+}
+
+
+std::vector<std::string> Connector::allConnectorIDs()
+{
+   guaranteeMap();
+   auto res = std::vector<std::string>();
+   for( auto c : * idmap )
+      res.push_back(c.first );
+   std::sort( res.begin(), res.end(), []( auto a, auto b ) {
+      auto q = strnatcasecmp( a.c_str(), b.c_str() );
+      return q < 0;
+   } );
    return res;
 }
 }

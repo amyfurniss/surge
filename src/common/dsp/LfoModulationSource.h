@@ -19,6 +19,8 @@
 #include "SurgeStorage.h"
 #include "SurgeVoiceState.h"
 #include "ModulationSource.h"
+#include "MSEGModulationHelper.h" // We need this for the MSEGEvalatorState member
+#include <functional>
 
 enum lfoenv_state
 {
@@ -28,6 +30,7 @@ enum lfoenv_state
    lenv_hold,
    lenv_decay,
    lenv_release,
+   lenv_msegrelease,
    lenv_stuck,
 };
 
@@ -74,12 +77,12 @@ private:
    SurgeStorage* storage;
    StepSequencerStorage* ss;
    MSEGStorage* ms;
-   float msegEvaluationState[5];
-   int msegLastEvaluated;
+   Surge::MSEG::EvaluatorState msegstate;
    FormulaModulatorStorage *fs;
    pdata* localcopy;
    bool phaseInitialized;
    void initPhaseFromStartPhase();
+   void msegEnvelopePhaseAdjustment();
 
    float phase, target, noise, noised1, env_phase, priorPhase;
    int unwrappedphase_intpart;
@@ -91,5 +94,10 @@ private:
    bool is_display;
    int step, shuffle_id;
    int magn, rate, iattack, idecay, idelay, ihold, isustain, irelease, startphase, ideform;
+
+   std::default_random_engine gen;
+   std::uniform_real_distribution<float> distro;
+   std::function<float()> urng;
+   static int urngSeed;
    quadr_osc sinus;
 };

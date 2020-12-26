@@ -4,10 +4,10 @@
 #include <vector>
 
 /*
- * For a discussino of why this is in src/common rather than src/common/gui
+ * For a discussion of why this is in src/common rather than src/common/gui
  *
  * 1. It is consumed by the SkinModel.cpp
- * 2. So see the discussion in SkinModel.h
+ * 2. See the discussion in SkinModel.h
  *
  */
 
@@ -16,11 +16,12 @@ namespace Surge
    namespace Skin
    {
       struct Color {
-         Color( std::string name, int r, int g, int b );
-         Color( std::string name, int r, int g, int b, int a );
+         Color(std::string name, int r, int g, int b);
+         Color(std::string name, int r, int g, int b, int a);
 
          static Color colorByName( const std::string &name );
          static std::vector<Color> getAllColors();
+
          std::string name;
          int r, g, b, a;
       };
@@ -43,7 +44,7 @@ namespace Colors
       }
       namespace Button
       {
-         extern const Surge::Skin::Color Background, Border, Text, BackgroundHover, BorderHover, TextHover;
+         extern const Surge::Skin::Color Background, Border, Text, BackgroundHover, BorderHover, TextHover, BackgroundPressed, BorderPressed, TextPressed;
       }
       namespace Checkbox
       {
@@ -71,10 +72,11 @@ namespace Colors
       }
       namespace Menu
       {
-         extern const Surge::Skin::Color Text;
+         extern const Surge::Skin::Color Text, TextHover;
       }
-      namespace SelectorPanel {
-         extern const Surge::Skin::Color LabelBorder;
+      namespace Grid
+      {
+         extern const Surge::Skin::Color Border;
       }
    }
 
@@ -132,73 +134,67 @@ namespace Colors
 
    namespace Menu
    {
-      extern const Surge::Skin::Color Name, NameHover, Value, ValueHover, ValueDeactivated, NameDeactivated;
-      extern const Surge::Skin::Color FilterValue, FilterValueHover;
+      extern const Surge::Skin::Color Name, NameHover, NameDeactivated, Value, ValueHover, ValueDeactivated, FilterValue, FilterValueHover;
    }
 
    namespace ModSource
    {
       namespace Unused
       {
-          extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover;
+         extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover;
       }
       namespace Used
       {
-          extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover, UsedModHover;
+         extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover, UsedModHover;
       }
       namespace Selected
       {
-          extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover, UsedModHover;
+         extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover, UsedModHover;
 
           namespace Used
           {
-              extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover, UsedModHover;
+             extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover, UsedModHover;
           }
       }
       namespace Armed
       {
-          extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover, UsedModHover;
+         extern const Surge::Skin::Color Background, Border, BorderHover, Text, TextHover, UsedModHover;
+      }
+      namespace Macro
+      {
+         extern const Surge::Skin::Color Background, Fill;
       }
    }
 
    namespace MSEGEditor
    {
-      extern const Surge::Skin::Color Background, Curve, Panel, Text;
+      extern const Surge::Skin::Color Background, Curve, DeformCurve, CurveHighlight, Panel, Text;
 
       namespace Axis
       {
-          extern const Surge::Skin::Color Line, Text;
+         extern const Surge::Skin::Color Line, Text, SecondaryText;
       }
       namespace GradientFill
       {
-          extern const Surge::Skin::Color StartColor, EndColor;
+         extern const Surge::Skin::Color StartColor, EndColor;
       }
       namespace Grid
       {
-          extern const Surge::Skin::Color Primary, Secondary;
+         extern const Surge::Skin::Color Primary, SecondaryHorizontal, SecondaryVertical;
       }
       namespace Loop
       {
-          extern const Surge::Skin::Color Line;
+         extern const Surge::Skin::Color Marker, RegionAxis, RegionFill, RegionBorder;
       }
       namespace NumberField
       {
-         extern const Surge::Skin::Color Background, Text, Border;
+         extern const Surge::Skin::Color Text, TextHover;
       }
    }
 
    namespace NumberField
    {
-      extern const Surge::Skin::Color DefaultText, DefaultHoverText;
-   }
-
-   namespace Scene {
-      extern const Surge::Skin::Color PitchBendText,
-                  PitchBendTextHover,
-                  SplitPolyText,
-                  SplitPolyTextHover,
-                  KeytrackText,
-                  KeytrackTextHover;
+      extern const Surge::Skin::Color Text, TextHover;
    }
 
    namespace Osc
@@ -220,7 +216,23 @@ namespace Colors
 
    namespace PatchBrowser
    {
-      extern const Surge::Skin::Color Background, Text;
+      extern const Surge::Skin::Color Text;
+   }
+
+   namespace Scene
+   {
+      namespace PitchBendRange
+      {
+         extern const Surge::Skin::Color Text, HoverText;
+      }
+      namespace SplitPoint
+      {
+         extern const Surge::Skin::Color Text, HoverText;
+      }
+      namespace KeytrackRoot
+      {
+         extern const Surge::Skin::Color Text, HoverText;
+      }
    }
 
    namespace Slider
@@ -235,14 +247,8 @@ namespace Colors
       }
    }
 
-   namespace StatusButton
-   {
-      extern const Surge::Skin::Color Background, Border, Text, SelectedBackground, SelectedText;
-   }
-
    namespace VuMeter
    {
-      extern const Surge::Skin::Color Level, HighLevel, Border, Background;
+      extern const Surge::Skin::Color Border, Background;
    }
-
 }

@@ -16,7 +16,6 @@
 #include "SurgeSuperOscillator.h"
 #include "DspUtilities.h"
 
-
 /*
 **
 ** ## Overview
@@ -147,9 +146,7 @@ using namespace std;
 // pow(ln(0.5)/(samplerate/50hz)
 const float hpf_cycle_loss = 0.995f;
 
-AbstractBlitOscillator::AbstractBlitOscillator(SurgeStorage* storage,
-                                               OscillatorStorage* oscdata,
-                                               pdata* localcopy)
+AbstractBlitOscillator::AbstractBlitOscillator(SurgeStorage* storage, OscillatorStorage* oscdata, pdata* localcopy)
     : Oscillator(storage, oscdata, localcopy)
 {
    integrator_hpf = (1.f - 2.f * 20.f * samplerate_inv);
@@ -240,12 +237,12 @@ void SurgeSuperOscillator::init(float pitch, bool is_display)
    dc = 0;
 
    // Init here
-   id_shape = oscdata->p[0].param_id_in_scene;
-   id_pw = oscdata->p[1].param_id_in_scene;
-   id_pw2 = oscdata->p[2].param_id_in_scene;
-   id_sub = oscdata->p[3].param_id_in_scene;
-   id_sync = oscdata->p[4].param_id_in_scene;
-   id_detune = oscdata->p[5].param_id_in_scene;
+   id_shape = oscdata->p[sso_shape].param_id_in_scene;
+   id_pw = oscdata->p[sso_width1].param_id_in_scene;
+   id_pw2 = oscdata->p[sso_width2].param_id_in_scene;
+   id_sub = oscdata->p[sso_mainsubmix].param_id_in_scene;
+   id_sync = oscdata->p[sso_sync].param_id_in_scene;
+   id_detune = oscdata->p[sso_unison_detune].param_id_in_scene;
 
    float rate = 0.05;
    l_pw.setRate(rate);
@@ -254,7 +251,7 @@ void SurgeSuperOscillator::init(float pitch, bool is_display)
    l_sub.setRate(rate);
    l_sync.setRate(rate);
 
-   n_unison = limit_range(oscdata->p[6].val.i, 1, MAX_UNISON);
+   n_unison = limit_range(oscdata->p[sso_unison_voices].val.i, 1, MAX_UNISON);
    if (is_display)
       n_unison = 1;
    prepare_unison(n_unison);
@@ -272,61 +269,57 @@ void SurgeSuperOscillator::init(float pitch, bool is_display)
    {
       if (oscdata->retrigger.val.b || is_display)
       {
-         oscstate[i] = 0; //(float)i / (float)n_unison;
-         syncstate[i] = 0;
-         last_level[i] = -0.4;
+         oscstate[i] = 0.f;
+         syncstate[i] = 0.f;
+         last_level[i] = 0.f;
       }
       else
       {
          double drand = (double)rand() / RAND_MAX;
-         double detune = oscdata->p[5].get_extended(localcopy[id_detune].f) * (detune_bias * float(i) + detune_offset);
-         // double t = drand * max(2.0,dsamplerate_os / (16.35159783 *
-         // pow((double)1.05946309435,(double)pitch)));
-         // used to be 0.25 * detune - 12
+         double detune = oscdata->p[sso_unison_detune].get_extended(localcopy[id_detune].f) *
+                         (detune_bias * float(i) + detune_offset);
          double st = 0.5 * drand * storage->note_to_pitch_inv_tuningctr(detune);
          drand = (double)rand() / RAND_MAX;
-         // double ot = 0.25 * drand * storage->note_to_pitch_inv(detune + l_sync.v);
-         // HACK test 0.2*
          oscstate[i] = st;
          syncstate[i] = st;
          last_level[i] = 0.0;
       }
-      dc_uni[i] = 0;
-      state[i] = 0;
+      dc_uni[i] = 0.f;
+      state[i] = 0.f;
       pwidth[i] = limit_range(l_pw.v, 0.001f, 0.999f);
-      driftlfo2[i] = 0.f;
       driftlfo[i] = 0.f;
+      driftlfo2[i] = 0.f;
    }
 }
 
 void SurgeSuperOscillator::init_ctrltypes()
 {
-   oscdata->p[0].set_name("Shape");
-   oscdata->p[0].set_type(ct_percent_bidirectional);
-   oscdata->p[1].set_name("Width");
-   oscdata->p[1].set_type(ct_percent);
-   oscdata->p[1].val_default.f = 0.5f;
-   oscdata->p[2].set_name("Sub Osc Width");
-   oscdata->p[2].set_type(ct_percent);
-   oscdata->p[2].val_default.f = 0.5f;
-   oscdata->p[3].set_name("Main<>Sub Mix");
-   oscdata->p[3].set_type(ct_percent);
-   oscdata->p[4].set_name("Sync");
-   oscdata->p[4].set_type(ct_syncpitch);
-   oscdata->p[5].set_name("Unison Detune");
-   oscdata->p[5].set_type(ct_oscspread);
-   oscdata->p[6].set_name("Unison Voices");
-   oscdata->p[6].set_type(ct_osccount);
+   oscdata->p[sso_shape].set_name("Shape");
+   oscdata->p[sso_shape].set_type(ct_percent_bidirectional);
+   oscdata->p[sso_width1].set_name("Width 1");
+   oscdata->p[sso_width1].set_type(ct_percent);
+   oscdata->p[sso_width1].val_default.f = 0.5f;
+   oscdata->p[sso_width2].set_name("Width 2");
+   oscdata->p[sso_width2].set_type(ct_percent);
+   oscdata->p[sso_width2].val_default.f = 0.5f;
+   oscdata->p[sso_mainsubmix].set_name("Sub Mix");
+   oscdata->p[sso_mainsubmix].set_type(ct_percent);
+   oscdata->p[sso_sync].set_name("Sync");
+   oscdata->p[sso_sync].set_type(ct_syncpitch);
+   oscdata->p[sso_unison_detune].set_name("Unison Detune");
+   oscdata->p[sso_unison_detune].set_type(ct_oscspread);
+   oscdata->p[sso_unison_voices].set_name("Unison Voices");
+   oscdata->p[sso_unison_voices].set_type(ct_osccount);
 }
 void SurgeSuperOscillator::init_default_values()
 {
-   oscdata->p[0].val.f = 0.f;
-   oscdata->p[1].val.f = 0.5f;
-   oscdata->p[2].val.f = 0.5f;
-   oscdata->p[3].val.f = 0.f;
-   oscdata->p[4].val.f = 0.f;
-   oscdata->p[5].val.f = 0.2f;
-   oscdata->p[6].val.i = 1;
+   oscdata->p[sso_shape].val.f = 0.f;
+   oscdata->p[sso_width1].val.f = 0.5f;
+   oscdata->p[sso_width2].val.f = 0.5f;
+   oscdata->p[sso_mainsubmix].val.f = 0.f;
+   oscdata->p[sso_sync].val.f = 0.f;
+   oscdata->p[sso_unison_detune].val.f = 0.2f;
+   oscdata->p[sso_unison_voices].val.i = 1;
 }
 
 template <bool FM> void SurgeSuperOscillator::convolute(int voice, bool stereo)
@@ -339,39 +332,34 @@ template <bool FM> void SurgeSuperOscillator::convolute(int voice, bool stereo)
    ** the amount just covered.
    */
    
-   const bool NODC = false;
-   // assert(oscstate[voice]>=0.f);
-
    /*
    ** Detune by a combination of the LFO drift and the unison voice spread.
    */
    float detune = drift * driftlfo[voice];
    if (n_unison > 1)
-      detune += oscdata->p[5].get_extended(localcopy[id_detune].f) * (detune_bias * (float)voice + detune_offset);
-
+      detune += oscdata->p[sso_unison_detune].get_extended(localcopy[id_detune].f) * (detune_bias * (float)voice + detune_offset);
    
    float wf = l_shape.v;
    float sub = l_sub.v;
-
    const float p24 = (1 << 24);
+
    /*
    ** ipos is a value between 0 and 2^24 indicating how far along in oscstate (phase space for
    ** our state) we are
    */
    unsigned int ipos;
 
-   if ((l_sync.v > 0) && (syncstate[voice] < oscstate[voice]))
+   if (syncstate[voice] < oscstate[voice])
    {
       if (FM)
          ipos = (unsigned int)(p24 * (syncstate[voice] * pitchmult_inv * FMmul_inv));
       else
          ipos = (unsigned int)(p24 * (syncstate[voice] * pitchmult_inv));
-      // double t = max(0.5,dsamplerate_os * (1/8.175798915) * storage->note_to_pitch_inv(pitch +
-      // detune) * 2);
+
       float t;
-      // See the extensive comment below
       
-      if (! oscdata->p[5].absolute)
+      // See the extensive comment below
+      if (! oscdata->p[sso_unison_detune].absolute) 
          t = storage->note_to_pitch_inv_tuningctr(detune) * 2;
       else
          // Copy the mysterious *2 and drop the +sync
@@ -398,11 +386,11 @@ template <bool FM> void SurgeSuperOscillator::convolute(int voice, bool stereo)
    ** Basically the 'integer part' of the position.
    */
    unsigned int delay;
+
    if (FM)
       delay = FMdelay;
    else
       delay = ((ipos >> 24) & 0x3f);
-
 
    /*
    ** m and lipol128 are the integer and fractional part of the number of 256ths
@@ -423,7 +411,7 @@ template <bool FM> void SurgeSuperOscillator::convolute(int voice, bool stereo)
    const float s = 0.99952f;
    float sync = min((float)l_sync.v, (12 + 72 + 72) - pitch);
    float t;
-   if (oscdata->p[5].absolute)
+   if (oscdata->p[sso_unison_detune].absolute)
    {
       /* 
       ** Oh so this line of code. What is it doing?
@@ -473,35 +461,27 @@ template <bool FM> void SurgeSuperOscillator::convolute(int voice, bool stereo)
    {
       pwidth[voice] = l_pw.v;
       pwidth2[voice] = 2.f * l_pw2.v;
-      float tg =
-          ((1 + wf) * 0.5f + (1 - pwidth[voice]) * (-wf)) * (1 - sub) +
-          0.5f * sub *
-              (2.f - pwidth2[voice]); // calculate the height of the first impulse of the cycle
+      float tg = ((1 + wf) * 0.5f + (1 - pwidth[voice]) * (-wf)) * (1 - sub) + 0.5f * sub * (2.f - pwidth2[voice]); // calculate the height of the first impulse of the cycle
       g = tg - last_level[voice];
       last_level[voice] = tg;
-      if (!NODC)
-         last_level[voice] -= (pwidth[voice]) * (pwidth2[voice]) * (1.f + wf) *
-                              (1.f - sub); // calculate the level the sub-cycle will have at the end
-                                           // of it's duration taking DC into account
+      last_level[voice] -= (pwidth[voice]) * (pwidth2[voice]) * (1.f + wf) * (1.f - sub); // calculate the level the sub-cycle will have at the end
+                                                                                          // of its duration taking DC into account
       break;
    }
    case 1:
       g = wf * (1.f - sub) - sub;
       last_level[voice] += g;
-      if (!NODC)
-         last_level[voice] -= (1 - pwidth[voice]) * (2 - pwidth2[voice]) * (1 + wf) * (1.f - sub);
+      last_level[voice] -= (1 - pwidth[voice]) * (2 - pwidth2[voice]) * (1 + wf) * (1.f - sub);
       break;
    case 2:
       g = 1.f - sub;
       last_level[voice] += g;
-      if (!NODC)
-         last_level[voice] -= (pwidth[voice]) * (2 - pwidth2[voice]) * (1 + wf) * (1.f - sub);
+      last_level[voice] -= (pwidth[voice]) * (2 - pwidth2[voice]) * (1 + wf) * (1.f - sub);
       break;
    case 3:
       g = wf * (1.f - sub) + sub;
       last_level[voice] += g;
-      if (!NODC)
-         last_level[voice] -= (1 - pwidth[voice]) * (pwidth2[voice]) * (1 + wf) * (1.f - sub);
+      last_level[voice] -= (1 - pwidth[voice]) * (pwidth2[voice]) * (1 + wf) * (1.f - sub);
       break;
    };
 
@@ -557,12 +537,9 @@ template <bool FM> void SurgeSuperOscillator::convolute(int voice, bool stereo)
       }
    }
 
-   if (!NODC)
-   {
-      float olddc = dc_uni[voice];
-      dc_uni[voice] = t_inv * (1.f + wf) * (1 - sub); //*pitchmult;
-      dcbuffer[(bufpos + FIRoffset + delay)] += (dc_uni[voice] - olddc);
-   }
+   float olddc = dc_uni[voice];
+   dc_uni[voice] = t_inv * (1.f + wf) * (1 - sub);
+   dcbuffer[(bufpos + FIRoffset + delay)] += (dc_uni[voice] - olddc);
 
    if (state[voice] & 1)
       rate[voice] = t * (1.0 - pwidth[voice]);
@@ -642,11 +619,15 @@ void SurgeSuperOscillator::process_block(
       ** FIXME - document the FM branch
       */
       for (l = 0; l < n_unison; l++)
+      {
          driftlfo[l] = drift_noise(driftlfo2[l]);
+      }
+
       for (int s = 0; s < BLOCK_SIZE_OS; s++)
       {
          float fmmul = limit_range(1.f + depth * master_osc[s], 0.1f, 1.9f);
          float a = pitchmult * fmmul;
+
          FMdelay = s;
 
          for (l = 0; l < n_unison; l++)
@@ -660,8 +641,7 @@ void SurgeSuperOscillator::process_block(
             }
 
             oscstate[l] -= a;
-            if (l_sync.v > 0)
-               syncstate[l] -= a;
+            syncstate[l] -= a;
          }
       }
    }
@@ -671,6 +651,7 @@ void SurgeSuperOscillator::process_block(
       ** The amount of phase space we need to cover is the oversample block size * the wavelength 
       */
       float a = (float)BLOCK_SIZE_OS * pitchmult;
+
       for (l = 0; l < n_unison; l++)
       {
          driftlfo[l] = drift_noise(driftlfo2[l]);
@@ -692,8 +673,7 @@ void SurgeSuperOscillator::process_block(
          ** oscillator and sync state
          */
          oscstate[l] -= a;
-         if (l_sync.v > 0)
-            syncstate[l] -= a;
+         syncstate[l] -= a;
 
          /*
          ** At this point we are guaranteed that the oscbuffer contains enough

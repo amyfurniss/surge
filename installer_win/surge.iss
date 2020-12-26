@@ -30,6 +30,7 @@ DefaultDirName={cf}\VST3\Surge Synth Team\
 DefaultGroupName=Surge
 DisableProgramGroupPage=yes
 DisableDirPage=yes
+DisableReadyPage=no
 LicenseFile=..\LICENSE
 OutputBaseFilename="{#MyAppName}-{#MyAppVersion}-Setup"
 SetupIconFile=surge.ico
@@ -58,7 +59,7 @@ Name: EffectsVST3; Description: SurgeEffectsBank VST3 (64-bit); Types: full comp
 Source: ..\resources\data\*; DestDir: {commonappdata}\Surge; Components: Data; Flags: recursesubdirs; Excludes: "*.git";
 Source: ..\resources\fonts\Lato-Regular.ttf; DestDir: "{fonts}"; Components: Data; FontInstall: "Lato"; Flags: onlyifdoesntexist uninsneveruninstall
 Source: ..\build\surge_products\Surge.vst3; DestDir: {cf}\VST3\Surge Synth Team\; Components: VST3; Flags: ignoreversion
-Source: ..\surge-fx\build\product\SurgeEffectsBank.vst3; DestDir: {cf}\VST3\Surge Synth Team\; Components: EffectsVST3; Flags: ignoreversion skipifsourcedoesntexist recursesubdirs
+Source: ..\build\surge_products\SurgeEffectsBank.vst3; DestDir: {cf}\VST3\Surge Synth Team\; Components: EffectsVST3; Flags: ignoreversion skipifsourcedoesntexist recursesubdirs
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -71,3 +72,23 @@ Filename: "{cmd}"; \
     WorkingDir: "{cf}\VST3"; \
     Parameters: "/C mklink /D /J  ""{cf}\VST3\Surge Synth Team\SurgeData"" ""{commonappdata}\Surge"""; \
     Flags: runascurrentuser
+
+[Code]
+procedure AddToReadyMemo(var Memo: string; Info, NewLine: string);
+begin
+  if Info <> '' then Memo := Memo + Info + Newline + NewLine;
+end;
+
+function UpdateReadyMemo(
+  Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo,
+  MemoGroupInfo, MemoTasksInfo: String): String;
+begin
+  AddToReadyMemo(Result, MemoComponentsInfo, NewLine);
+
+  Result := Result + 'Installation Locations:' + NewLine
+  Result := Result + Space + 'Data Files: ' + ExpandConstant( '{commonappdata}' ) + '\Surge' + NewLine
+  Result := Result + Space + 'VST3: ' + ExpandConstant( '{cf}' ) + '\VST3\Surge Synth Team' + NewLine
+  Result := Result + Space + 'Portable Junction: ' + ExpandConstant( '{cf}' ) + '\VST3\Surge Synth Team\SurgeData' + NewLine
+  
+end;
+

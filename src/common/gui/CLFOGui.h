@@ -22,12 +22,13 @@
 #include "SkinColors.h"
 #include "SurgeBitmaps.h"
 #include "CScalableBitmap.h"
-#include "CCursorHidingControl.h"
+#include "CursorControlGuard.h"
 
 
 class CScalableBitmap;
 
-class CLFOGui : public CCursorHidingControl, public Surge::UI::SkinConsumingComponent
+class CLFOGui : public VSTGUI::CControl, public Surge::UI::SkinConsumingComponent,
+                public Surge::UI::CursorControlAdapter<CLFOGui>
 {
 public:
    const static int margin = 2;
@@ -48,8 +49,9 @@ public:
            MSEGStorage* ms = 0,
            FormulaModulatorStorage* fs = 0,
            std::shared_ptr<SurgeBitmaps> ibms = nullptr)
-      : CCursorHidingControl(size, listener, tag, 0),
-        bitmapStore( ibms )
+      : VSTGUI::CControl(size, listener, tag, 0),
+        bitmapStore( ibms ),
+         Surge::UI::CursorControlAdapter<CLFOGui>( storage )
    {
       this->lfodata = lfodata;
       this->storage = storage;
@@ -93,19 +95,13 @@ public:
       tsDen = d;
    }
 
+   void openPopup(VSTGUI::CPoint &where);
+
    bool insideTypeSelector( const VSTGUI::CPoint &where ) {
       return rect_shapes.pointInside(where);
    }
          
-   virtual void onMouseMoveDelta(VSTGUI::CPoint& where, const VSTGUI::CButtonState& buttons, double dx, double dy) override {}
-
-
-   virtual VSTGUI::CMouseEventResult onMouseExited(VSTGUI::CPoint& where, const VSTGUI::CButtonState& buttons) override {
-      ss_shift_hover = 0;
-      lfo_type_hover = -1;
-      invalid();
-      return VSTGUI::kMouseEventHandled;
-   }
+   virtual VSTGUI::CMouseEventResult onMouseExited(VSTGUI::CPoint& where, const VSTGUI::CButtonState& buttons) override;
 
 protected:
    LFOStorage* lfodata;
@@ -117,7 +113,7 @@ protected:
    int tsNum = 4, tsDen = 4;
    
    
-   VSTGUI::CRect shaperect[n_lfoshapes];
+   VSTGUI::CRect shaperect[n_lfo_types];
    VSTGUI::CRect steprect[n_stepseqsteps];
    VSTGUI::CRect gaterect[n_stepseqsteps];
    VSTGUI::CRect rect_ls, rect_le, rect_shapes, rect_steps, rect_steps_retrig;
@@ -128,16 +124,20 @@ protected:
 
    int draggedStep = -1;
    int keyModMult = 0;
+   bool forcedCursorToMSEGHand = false;
 
 
    bool draggedIntoTrigTray[16];
    int mouseDownTrigTray = -1;
    VSTGUI::CButtonState trigTrayButtonState;
    VSTGUI::CPoint rmStepStart, rmStepCurr;
+   VSTGUI::CPoint barDragTop;
+
+   bool enqueueCursorHide = false;
 
    int ss_shift_hover = 0;
    int lfo_type_hover = -1;
    CScalableBitmap *typeImg, *typeImgHover, *typeImgHoverOn;
    
-   CLASS_METHODS(CLFOGui, CCursorHidingControl)
+   CLASS_METHODS(CLFOGui, VSTGUI::CControl)
 };

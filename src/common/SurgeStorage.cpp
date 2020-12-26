@@ -23,6 +23,7 @@
 #include <map>
 #include <queue>
 #include <vt_dsp/vt_dsp_endian.h>
+#include "UserDefaults.h"
 #if MAC
 #include <cstdlib>
 #include <sys/stat.h>
@@ -64,7 +65,7 @@ float table_dB alignas(16)[512],
       table_envrate_linear alignas(16)[512],
       table_glide_exp alignas(16)[512],
       table_glide_log alignas(16)[512];
-float waveshapers alignas(16)[8][1024];
+float waveshapers alignas(16)[n_ws_types][1024];
 float samplerate = 0, samplerate_inv;
 double dsamplerate, dsamplerate_inv;
 double dsamplerate_os, dsamplerate_os_inv;
@@ -124,7 +125,7 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
            }
    }*/
 
-   for (int s = 0; s < 2; s++)
+   for (int s = 0; s < n_scenes; s++)
       for (int o = 0; o < n_oscs; o++)
          for (int i = 0; i < max_mipmap_levels; i++)
             for (int j = 0; j < max_subtables; j++)
@@ -132,6 +133,24 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
                getPatch().scene[s].osc[o].wt.TableF32WeakPointers[i][j] = 0;
                getPatch().scene[s].osc[o].wt.TableI16WeakPointers[i][j] = 0;
             }
+
+   for( int s = 0; s < n_scenes; ++s)
+      for( int fu=0; fu<n_filterunits_per_scene; ++fu )
+         for( int t=0; t<n_fu_types; ++t )
+         {
+            switch( t )
+            {
+            case fut_lpmoog:
+            case fut_obxd_4pole:
+            case fut_diode:
+               subtypeMemory[s][fu][t] = 3;
+               break;
+            default:
+               subtypeMemory[s][fu][t] = 0;
+               break;
+            }
+         }
+
    init_tables();
    pitch_bend = 0;
    last_key[0] = 60;
@@ -148,7 +167,7 @@ SurgeStorage::SurgeStorage(std::string suppliedDataPath) : otherscene_clients(0)
    for (int i = 0; i < n_modsources; i++)
       modsource_vu[i] = 0.f; // remove?
 
-   for (int s = 0; s < 2; s++)
+   for (int s = 0; s < n_scenes; s++)
       for (int cc = 0; cc < 128; cc++)
          poly_aftertouch[s][cc] = 0.f;
 
@@ -389,9 +408,9 @@ bailOnPortable:
                          "Surge failed to initialize");
    }
 #else
-   string snapshotmenupath = datapath + "configuration.xml";
+   const auto snapshotmenupath{string_to_path(datapath + "configuration.xml")};
 
-   if (!snapshotloader.LoadFile(snapshotmenupath.c_str())) // load snapshots (& config-stuff)
+   if (!snapshotloader.LoadFile(snapshotmenupath)) // load snapshots (& config-stuff)
    {
       Surge::Error exc("Cannot find 'configuration.xml' in path '" + datapath + "'. Please reinstall surge.",
                        "Surge is not properly installed.");
@@ -404,10 +423,8 @@ bailOnPortable:
    bool loadWtAndPatch = true;
 
 #if !TARGET_RACK   
-#if TARGET_LV2
-   // skip loading during export, it pops up an irrelevant error dialog
+   // skip loading during export, it pops up an irrelevant error dialog. Only used by LV2
    loadWtAndPatch = !skipLoadWtAndPatch;
-#endif
    if (loadWtAndPatch)
    {
       refresh_wtlist();
@@ -446,7 +463,7 @@ bailOnPortable:
    // Load the XML DocStrings if we are loading startup data
    if( loadWtAndPatch )
    {
-      auto dsf = datapath + "paramdocumentation.xml";
+      auto dsf = string_to_path(datapath + "paramdocumentation.xml");
       TiXmlDocument doc;
       if( ! doc.LoadFile(dsf) || doc.Error() )
       {
@@ -518,27 +535,21 @@ bailOnPortable:
       for( int i = 0; i < n_lfos; ++i )
       {
          auto ms = &(_patch->msegs[s][i]);
-         ms->n_activeSegments = 4;
-         ms->segments[0].duration = 0.25;
-         ms->segments[0].type = MSEGStorage::segment::LINEAR;
-         ms->segments[0].v0 = 0.0;
-
-         ms->segments[1].duration = 0.25;
-         ms->segments[1].type = MSEGStorage::segment::LINEAR;
-         ms->segments[1].v0 = 1.0;
-
-         ms->segments[2].duration = MSEGStorage::minimumDuration;
-         ms->segments[2].type = MSEGStorage::segment::LINEAR;
-         ms->segments[2].v0 = 0.7;
-
-         ms->segments[3].duration = 0.5;
-         ms->segments[3].type = MSEGStorage::segment::SCURVE;
-         ms->segments[3].v0 = -0.7;
-         ms->segments[3].cpduration = 0.4;
-         ms->segments[3].cpv = -0.3;
+         if( ms_lfo1 + i >= ms_slfo1 && ms_lfo1 + i <= ms_slfo6 )
+         {
+            Surge::MSEG::createInitSceneMSEG(ms);
+         }
+         else
+         {
+            Surge::MSEG::createInitVoiceMSEG(ms);
+         }
          Surge::MSEG::rebuildCache( ms );
       }
    }
+
+   monoPedalMode = (MonoPedalMode)Surge::Storage::getUserDefaultValue(this,
+                                                                      "monoPedalMode",
+                                                                      MonoPedalMode::HOLD_ALL_NOTES );
 }
 
 SurgePatch& SurgeStorage::getPatch()
@@ -881,7 +892,7 @@ void SurgeStorage::refresh_wtlistAddDir(bool userDir, std::string subdir)
 void SurgeStorage::perform_queued_wtloads()
 {
    SurgePatch& patch = getPatch();  //Change here is for performance and ease of debugging, simply not calling getPatch so many times. Code should behave identically.
-   for (int sc = 0; sc < 2; sc++)
+   for (int sc = 0; sc < n_scenes; sc++)
    {
       for (int o = 0; o < n_oscs; o++)
       {
@@ -1059,10 +1070,10 @@ void SurgeStorage::clipboard_copy(int type, int scene, int entry)
       cgroup = 6;
       cgroup_e = entry + ms_lfo1;
       id = getPatch().scene[scene].lfo[entry].shape.id;
-      if (getPatch().scene[scene].lfo[entry].shape.val.i == ls_stepseq)
+      if (getPatch().scene[scene].lfo[entry].shape.val.i == lt_stepseq)
          memcpy(&clipboard_stepsequences[0], &getPatch().stepsequences[scene][entry],
                 sizeof(StepSequencerStorage));
-      if (getPatch().scene[scene].lfo[entry].shape.val.i == ls_mseg)
+      if (getPatch().scene[scene].lfo[entry].shape.val.i == lt_mseg)
          clipboard_msegs[0] = getPatch().msegs[scene][entry];
       break;
    case cp_scene:
@@ -1142,7 +1153,7 @@ void SurgeStorage::clipboard_copy(int type, int scene, int entry)
 
 void SurgeStorage::clipboard_paste(int type, int scene, int entry)
 {
-   assert(scene < 2);
+   assert(scene < n_scenes);
    if (type != clipboard_type)
       return;
 
@@ -1204,6 +1215,7 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry)
          getPatch().param_ptr[pid]->porta_gliss = p.porta_gliss;
          getPatch().param_ptr[pid]->porta_retrigger = p.porta_retrigger;
          getPatch().param_ptr[pid]->porta_curve = p.porta_curve;
+         getPatch().param_ptr[pid]->deform_type = p.deform_type;
       }
 
       switch (type)
@@ -1237,10 +1249,10 @@ void SurgeStorage::clipboard_paste(int type, int scene, int entry)
       }
       break;
       case cp_lfo:
-         if (getPatch().scene[scene].lfo[entry].shape.val.i == ls_stepseq)
+         if (getPatch().scene[scene].lfo[entry].shape.val.i == lt_stepseq)
             memcpy(&getPatch().stepsequences[scene][entry], &clipboard_stepsequences[0],
                    sizeof(StepSequencerStorage));
-         if (getPatch().scene[scene].lfo[entry].shape.val.i == ls_mseg)
+         if (getPatch().scene[scene].lfo[entry].shape.val.i == lt_mseg)
             getPatch().msegs[scene][entry] = clipboard_msegs[0];
 
          break;
@@ -1400,29 +1412,22 @@ void SurgeStorage::init_tables()
    for (int i = 0; i < 1024; i++)
    {
       double x = ((double)i - 512.0) * mult;
-      waveshapers[0][i] = (float)tanh(x);                            // wst_tanh,
-      waveshapers[1][i] = (float)pow(tanh(pow(::abs(x), 5.0)), 0.2); // wst_hard
+
+      waveshapers[wst_soft][i] = (float)tanh(x);
+      waveshapers[wst_hard][i] = (float)pow(tanh(pow(::abs(x), 5.0)), 0.2);
       if (x < 0)
-         waveshapers[1][i] = -waveshapers[1][i];
-      waveshapers[2][i] = (float)shafted_tanh(x + 0.5) - shafted_tanh(0.5);       // wst_assym
-      waveshapers[3][i] = (float)sin((double)((double)i - 512.0) * M_PI / 512.0); // wst_sinus
-      waveshapers[4][i] = (float)tanh((double)((double)i - 512.0) * mult);        // wst_digi
+         waveshapers[wst_hard][i] = -waveshapers[1][i];
+      waveshapers[wst_asym][i] = (float)shafted_tanh(x + 0.5) - shafted_tanh(0.5);
+      waveshapers[wst_sine][i] = (float)sin((double)((double)i - 512.0) * M_PI / 512.0);
+      waveshapers[wst_digital][i] = (float)tanh(x);
    }
-   /*for(int i=0; i<512; i++)
-   {
-           double x = 2.0*M_PI*((double)i)/512.0;
-           table_sin[i] = sin(x);
-           table_sin_offset[i] = sin(x+(2.0*M_PI/512.0))-sin(x);
-   }*/
+
    // from 1.2.2
-   // nyquist_pitch = (float)12.f*log((0.49999*M_PI) / (dsamplerate_os_inv *
-   // 2*M_PI*440.0))/log(2.0);	// include some margin for error (and to avoid denormals in IIR
+   // nyquist_pitch = (float)12.f*log((0.49999*M_PI) / (dsamplerate_os_inv */ 2*M_PI*440.0))/log(2.0);	// include some margin for error (and to avoid denormals in IIR
    // filter clamping)
    // 1.3
-   nyquist_pitch =
-       (float)12.f * log((0.75 * M_PI) / (dsamplerate_os_inv * 2 * M_PI * 440.0)) /
-       log(2.0); // include some margin for error (and to avoid denormals in IIR filter clamping)
-   vu_falloff = 0.997f; // TODO should be samplerate-dependent (this is per 32-sample block at 44.1)
+   nyquist_pitch = (float)12.f * log((0.75 * M_PI) / (dsamplerate_os_inv * 2 * M_PI * 440.0)) / log(2.0); // include some margin for error (and to avoid denormals in IIR filter clamping)
+   vu_falloff = 0.997f; // TODO should be sample rate-dependent (this is per 32-sample block at 44.1k)
 }
 
 float SurgeStorage::note_to_pitch(float x)
@@ -1638,28 +1643,27 @@ bool SurgeStorage::remapToKeyboard(const Tunings::KeyboardMapping& k)
    return true;
 }
 
-#if TARGET_LV2
 bool SurgeStorage::skipLoadWtAndPatch = false;
-#endif
 
 void SurgeStorage::rescanUserMidiMappings()
 {
    userMidiMappingsXMLByName.clear();
-   if( fs::is_directory( fs::path( userMidiMappingsPath ) ) ) {
-      for( auto &d : fs::directory_iterator( fs::path( userMidiMappingsPath ) ) )
+   std::error_code ec;
+   const auto extension{fs::path{".srgmid"}.native()};
+   for (const fs::path& d : fs::directory_iterator{string_to_path(userMidiMappingsPath), ec})
+   {
+      if (d.extension().native() == extension)
       {
-         auto fn = path_to_string(d.path());
-         std::string ending = ".srgmid";
-         if( fn.length() >= ending.length() && ( 0 == fn.compare( fn.length() - ending.length(), ending.length(), ending ) ) )
-         {
-            TiXmlDocument doc;
-            if( ! doc.LoadFile( fn.c_str() ) ) continue;
-            auto r = TINYXML_SAFE_TO_ELEMENT( doc.FirstChild( "surge-midi" ) );
-            if( !r ) continue;
-            if( !r->Attribute( "name" ) ) continue;
-            
-            userMidiMappingsXMLByName[r->Attribute("name")] = doc;
-         }
+         TiXmlDocument doc;
+         if (!doc.LoadFile(d))
+            continue;
+         const auto r{TINYXML_SAFE_TO_ELEMENT(doc.FirstChild("surge-midi"))};
+         if (!r)
+            continue;
+         const auto a{r->Attribute("name")};
+         if (!a)
+            continue;
+         userMidiMappingsXMLByName.emplace(a, std::move(doc));
       }
    }
 }
@@ -1766,7 +1770,7 @@ void SurgeStorage::storeMidiMappingToName(std::string name)
    fs::create_directories(string_to_path(userMidiMappingsPath));
    std::string fn = Surge::Storage::appendDirectory(userMidiMappingsPath, name + ".srgmid");
 
-   if( ! doc.SaveFile( fn.c_str() ) )
+   if (!doc.SaveFile(string_to_path(fn)))
    {
       std::ostringstream oss;
       oss << "Unable to save MIDI settings to '" << fn << "'!";

@@ -18,10 +18,11 @@
 #include "vstcontrols.h"
 #include "SurgeBitmaps.h"
 #include "SurgeParamConfig.h"
-#include "CCursorHidingControl.h"
+#include "CursorControlGuard.h"
 #include "SkinSupport.h"
 
-class CMenuAsSlider : public CCursorHidingControl, public Surge::UI::SkinConsumingComponent
+class CMenuAsSlider : public VSTGUI::CControl, public Surge::UI::SkinConsumingComponent,
+                      public Surge::UI::CursorControlAdapter<CMenuAsSlider>
 {
 public:
    CMenuAsSlider(const VSTGUI::CPoint& loc,
@@ -39,11 +40,6 @@ public:
    virtual void draw(VSTGUI::CDrawContext*) override;
    void setLabel( const char* lab ) { label = lab; }
 
-   virtual void onMouseMoveDelta(VSTGUI::CPoint& where,
-                                 const VSTGUI::CButtonState& buttons,
-                                 double dx,
-                                 double dy) override {}
-   
    virtual bool onWheel(const VSTGUI::CPoint& where, const float &distane, const VSTGUI::CButtonState& buttons) override;
 
    virtual VSTGUI::CMouseEventResult onMouseDown(VSTGUI::CPoint& where, const VSTGUI::CButtonState& buttons) override; ///< called when a mouse down event occurs
@@ -78,7 +74,7 @@ public:
    bool in_hover = false;
    SurgeStorage* storage = nullptr;
 
-   int bgid = IDB_MENU_IN_SLIDER_BG;
+   int bgid = IDB_MENU_AS_SLIDER;
    void setBackgroundID(int q) { bgid = q; onSkinChanged(); }
 
    bool filtermode = false;
@@ -98,8 +94,11 @@ public:
    void setDragGlyph( int id, int size = 18 ) {
       dglphyid = id; dglyphsize = size; onSkinChanged();
    }
-      
-   
+   std::vector<std::pair<int,int>> glyphIndexMap;
+
+   std::vector<int> intOrdering;
+   float nextValueInOrder( float valueFrom, int inc );
+
 private:
    VSTGUI::CBitmap *pBackground = nullptr, *pBackgroundHover = nullptr, *pGlyph = nullptr, *pGlyphHover = nullptr;
    std::string label = "";

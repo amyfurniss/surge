@@ -19,6 +19,7 @@
 #include <iostream>
 #include "SkinColors.h"
 #include "DebugHelpers.h"
+#include "Parameter.h"
 
 using namespace VSTGUI;
 
@@ -30,7 +31,8 @@ CMenuAsSlider::CMenuAsSlider(const VSTGUI::CPoint& loc,
                              long tag,
                              std::shared_ptr<SurgeBitmaps> bitmapStore,
                              SurgeStorage* storage) :
-   CCursorHidingControl(CRect( loc, sz ), listener, tag, nullptr )
+   CControl(CRect( loc, sz ), listener, tag, nullptr ),
+      Surge::UI::CursorControlAdapter<CMenuAsSlider>(storage)
 {
    // this->storage = storage;
    auto size = CRect( 0, 0, sz.x, sz.y );
@@ -67,13 +69,14 @@ void CMenuAsSlider::draw( VSTGUI::CDrawContext *dc )
       d.left += dragRegion.getWidth();
    }
 
+   if( pBackground )
+   {
+      pBackground->draw( dc, d );
+   }
+
    if( isHover && pBackgroundHover )
    {
       pBackgroundHover->draw( dc, d );
-   }
-   else if( pBackground )
-   {
-      pBackground->draw( dc, d );
    }
 
    auto sge = dynamic_cast<SurgeGUIEditor*>(listener);
@@ -84,6 +87,7 @@ void CMenuAsSlider::draw( VSTGUI::CDrawContext *dc )
    {
       std::string dt = sge->getDisplayForTag( getTag() );
       auto valcol = skin->getColor(Colors::Menu::Value);
+
       if( isHover )
          valcol = skin->getColor(Colors::Menu::ValueHover);
 
@@ -126,17 +130,20 @@ void CMenuAsSlider::draw( VSTGUI::CDrawContext *dc )
       if( ! filtermode )
       {
          auto l = d;
-         l.left += 5;
+         l.left += 6;
          l.right = d.left + splitPoint;
          auto tl = label;
          trunc = false;
+
          while( dc->getStringWidth( tl.c_str() ) > l.getWidth() && tl.length() > 4 )
          {
             tl = tl.substr( 0, tl.length() - 3 );
             trunc = true;
          }
+
          if( trunc ) tl += "...";
          auto labcol = skin->getColor(Colors::Menu::Name);
+
          if (isHover)
             labcol = skin->getColor(Colors::Menu::NameHover);
          
@@ -150,19 +157,31 @@ void CMenuAsSlider::draw( VSTGUI::CDrawContext *dc )
       if( hasDragRegion )
       {
          int iv = floor( getValue() * ( iMax - iMin ) + 0.5 );
+
+         int yv = iv;
+         int xv = 0;
+         if( !glyphIndexMap.empty() )
+         {
+            auto gim = glyphIndexMap[iv];
+            xv = gim.first;
+            yv = gim.second;
+         }
+
          auto dbox = getViewSize();
          dbox.right = dbox.left + dglyphsize;
          float dw = (dbox.getHeight() - dglyphsize) / 2.0;
          dbox.top += dw;
          dbox.bottom -= dw;
-         VSTGUI::CPoint p( 0, iv * dglyphsize );
+         VSTGUI::CPoint p( xv * dglyphsize, yv * dglyphsize );
+
+         if( pGlyph )
+         {
+            pGlyph->draw( dc, dbox, p, 0xff );
+         }
+
          if( isHover && pGlyphHover )
          {
             pGlyphHover->draw( dc, dbox, p, 0xff );
-         }
-         else if( pGlyph )
-         {
-            pGlyph->draw( dc, dbox, p, 0xff );
          }
       }
    }
@@ -179,7 +198,7 @@ CMouseEventResult CMenuAsSlider::onMouseDown( CPoint &w, const CButtonState &but
       }
       else
       {
-         detachCursor(w);
+         startCursorHide(w);
          isDragRegionDrag = true;
          dragStart = w;
          dragDir = unk;
@@ -213,22 +232,17 @@ CMouseEventResult CMenuAsSlider::onMouseMoved( CPoint &w, const CButtonState &bu
       if( dist > 1 )
       {
          inc = 1;
-         dragStart = w;
+         if( ! resetToShowLocation() ) dragStart = w;
       }
       if( dist < -1 )
       {
          inc = -1;
-         dragStart = w;
+         if( ! resetToShowLocation() ) dragStart = w;
       }
+
       if( inc != 0 )
       {
-         int iv = floor( getValue() * ( iMax - iMin ) + 0.5 );
-         
-         iv = iv + inc;
-         if( iv < 0 ) iv = iMax;
-         if( iv > iMax ) iv = 0;
-         // This is the get_value_f01 code
-         float r = 0.005 + 0.99 * ( iv - iMin ) / ( float) ( iMax - iMin );
+         float r = nextValueInOrder(getValue(), inc );
          setValue( r );
          if( listener )
             listener->valueChanged(this);
@@ -241,7 +255,7 @@ CMouseEventResult CMenuAsSlider::onMouseMoved( CPoint &w, const CButtonState &bu
 CMouseEventResult CMenuAsSlider::onMouseUp( CPoint &w, const CButtonState &buttons ) {
    if( isDragRegionDrag )
    {
-      attachCursor();
+      endCursorHide();
       isDragRegionDrag = false;
    }
    return kMouseEventHandled;
@@ -275,34 +289,53 @@ bool CMenuAsSlider::onWheel( const VSTGUI::CPoint &where, const float &distance,
    float threshold = 1;
 #if WINDOWS
    threshold = 0.333333;
-#endif   
-
-   auto fv = [this](float v, int inc)
-                {
-                   int iv = floor( getValue() * ( iMax - iMin ) + 0.5 );
-                   iv = iv + inc;
-                   if( iv < 0 ) iv = iMax;
-                   if( iv > iMax ) iv = 0;
-                   // This is the get_value_f01 code
-                   float r = 0.005 + 0.99 * ( iv - iMin ) / ( float) ( iMax - iMin );
-                   return r;
-                };
+#endif
 
    if( wheelDistance > threshold ) {
       wheelDistance = 0;
-      setValue( fv( getValue(), -1 ) );
+      setValue( nextValueInOrder( getValue(), -1 ) );
       if( listener )
          listener->valueChanged(this);
    }
    if( wheelDistance < -threshold ) {
       wheelDistance = 0;
-      setValue( fv( getValue(), +1 ) );
+      setValue( nextValueInOrder( getValue(), +1 ) );
       if( listener )
          listener->valueChanged(this);
    }
    return true;
 }
 
+float CMenuAsSlider::nextValueInOrder(float v, int inc)
+{
+   int iv = Parameter::intUnscaledFromFloat(v, iMax, iMin );
+   if( intOrdering.size() > 0 && iMax == intOrdering.size() - 1 )
+   {
+      int pidx = 0;
+      for( int idx=0; idx<intOrdering.size(); idx++ )
+         if( intOrdering[idx] == iv )
+         {
+            pidx = idx;
+            break;
+         }
+      int nidx = pidx + inc;
+      if( nidx < 0 ) nidx = intOrdering.size() - 1;
+      else if( nidx >= intOrdering.size() ) nidx = 0;
+
+      iv = intOrdering[nidx];
+   }
+   else
+   {
+      iv = iv + inc;
+      if (iv < 0)
+         iv = iMax;
+      if (iv > iMax)
+         iv = 0;
+   }
+   // This is the get_value_f01 code
+   float r = Parameter::intScaledToFloat(iv, iMax, iMin );
+   return r;
+}
 void CMenuAsSlider::setDragRegion( const VSTGUI::CRect &r )
 {
    hasDragRegion = true;

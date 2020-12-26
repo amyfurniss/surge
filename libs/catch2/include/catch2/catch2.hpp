@@ -73,7 +73,7 @@
 #  define CATCH_PLATFORM_IPHONE
 # endif
 
-#elif defined(linux) || defined(__linux) || defined(__linux__)
+#elif defined(linux) || defined(__linux) || defined(__linux__) || defined(__FreeBSD__)
 #  define CATCH_PLATFORM_LINUX
 
 #elif defined(WIN32) || defined(__WIN32__) || defined(_WIN32) || defined(_MSC_VER) || defined(__MINGW32__)
@@ -7625,8 +7625,11 @@ namespace Catch {
 }
 
 #ifdef CATCH_PLATFORM_MAC
-
+#if defined(__x86_64__ )
     #define CATCH_TRAP() __asm__("int $3\n" : : ) /* NOLINT */
+#else
+#define CATCH_TRAP()
+#endif
 
 #elif defined(CATCH_PLATFORM_LINUX)
     // If we can use inline assembler, do it because this allows us to break

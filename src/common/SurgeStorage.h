@@ -24,12 +24,9 @@
 #include <atomic>
 #include <stdint.h>
 
-#ifndef TIXML_USE_STL
-#define TIXML_USE_STL
-#endif
-#include <tinyxml.h>
+#include "tinyxml/tinyxml.h"
 
-#include "ImportFilesystem.h"
+#include "filesystem/import.h"
 
 #include <fstream>
 #include <iterator>
@@ -53,6 +50,7 @@ const int n_lfos_scene = 6;
 const int n_lfos = n_lfos_voice + n_lfos_scene;
 const int n_osc_params = 7;
 const int n_fx_params = 12;
+const int n_fx_slots = 8;
 const int FIRipol_M = 256;
 const int FIRipol_M_bits = 8;
 const int FIRipol_N = 12;
@@ -60,29 +58,30 @@ const int FIRoffset = FIRipol_N >> 1;
 const int FIRipolI16_N = 8;
 const int FIRoffsetI16 = FIRipolI16_N >> 1;
 
-const int n_fx_slots=8;
-
 // XML storage fileformat revision
 // 0 -> 1 new EG attack shapes (0>1, 1>2, 2>2)
 // 1 -> 2 new LFO EG stages (if (decay == max) sustain = max else sustain = min
-// 2 -> 3 filter subtypes added comb should default to 1 and moog to 3
-// 3 -> 4 comb+/- combined into 1 filtertype (subtype 0,0->0 0,1->1 1,0->2 1,1->3 )
-// 4 -> 5 stereo filterconf now have seperate pan controls
-// 5 -> 6 new filter sound in v1.2 (same parameters, but different sound & changed resonance
-// response).
-// 6 -> 7 custom controller state now stored (in seq. recall)
-// 7 -> 8 larger resonance
-// range (old filters are set to subtype 1), pan2 -> width
-// 8 -> 9 now 8 controls (offset ids larger
-// than ctrl7 by +1), custom controllers have names (guess for pre-rev9 patches)
-// 9 -> 10 added character parameter
-// 10 -> 11 (1.6.2 release) added DAW Extra State
+// 2 -> 3 filter subtypes added: comb defaults to 1 and legacy ladder to 3
+// 3 -> 4 comb +/- combined into one filtertype (subtype 0,0->0 0,1->1 1,0->2 1,1->3 )
+// 4 -> 5 stereo filter configuration got seperate pan controls
+// 5 -> 6 new filter sound in v1.2 (same parameters, but different sound and changed resonance response)
+// 6 -> 7 custom controller state now stored (in DAW recall)
+// 7 -> 8 larger resonance range (old filters are set to subtype 1)
+//        pan2 -> width
+// 8 -> 9 macros extended to 8 (offset IDs larger than ctrl7 by +1)
+//        macros can have names (guess for pre-rev9 patches)
+// 9 -> 10 added Character parameter
+// 10 -> 11 (1.6.2 release) added DAW extra state
 // 11 -> 12 (1.6.3 release) added new parameters to the Distortion effect
-// 12 -> 13 (1.7.0 release) deactivation; sine LP/HP, sine/FM2/3 feedback extension/bipolar
-// 13 -> 14 add phaser number of stages parameter
-// 13 -> 14 add ability to configure vocoder modulator mono/sterao/L/R
+// 12 -> 13 (1.7.0 release) slider deactivation
+//                          sine LP/HP filters
+//                          sine/FM2/FM3 feedback extension/bipolar
+// 13 -> 14 (1.8.0 nightlies) add phaser number of stages parameter
+//                            add ability to configure vocoder modulator mono/sterao/L/R
+//                            add comb filter tuning and compatibility block
+// 14 -> 15 (1.8.0 release) apply the great filter remap of #3006
 
-const int ff_revision = 14;
+const int ff_revision = 15;
 
 extern float sinctable alignas(16)[(FIRipol_M + 1) * FIRipol_N * 2];
 extern float sinctable1X alignas(16)[(FIRipol_M + 1) * FIRipol_N];
@@ -92,7 +91,6 @@ extern float table_envrate_lpf alignas(16)[512],
              table_glide_exp alignas(16)[512],
              table_glide_log alignas(16)[512];
 extern float table_note_omega alignas(16)[2][512];
-extern float waveshapers alignas(16)[8][1024];
 extern float samplerate, samplerate_inv;
 extern double dsamplerate, dsamplerate_inv;
 extern double dsamplerate_os, dsamplerate_os_inv;
@@ -104,6 +102,7 @@ const int n_total_params = n_global_params + 2 * n_scene_params + n_global_postp
 const int metaparam_offset = 20480; // has to be bigger than total + 16 * 130 for fake VST3 mapping
 const int n_scenes = 2;
 const int n_filterunits_per_scene = 2;
+const int n_max_filter_subtypes = 16;
 
 enum scene_mode
 {
@@ -111,10 +110,11 @@ enum scene_mode
    sm_split,
    sm_dual,
    sm_chsplit,
-   n_scenemodes,
+
+   n_scene_modes,
 };
 
-const char scene_mode_names[n_scenemodes][16] =
+const char scene_mode_names[n_scene_modes][16] =
 {
    "Single",
    "Key Split",
@@ -130,9 +130,10 @@ enum play_mode
    pm_mono_fp,
    pm_mono_st_fp,
    pm_latch,
-   n_polymodes,
+
+   n_play_modes,
 };
-const char play_mode_names[n_polymodes][64] =
+const char play_mode_names[n_play_modes][64] =
 {
    "Poly",
    "Mono",
@@ -149,15 +150,25 @@ enum porta_curve
     porta_exp = 1,
 };
 
-enum lfo_mode
+enum deform_type
+{
+    type_1,
+    type_2,
+    type_3,
+
+    n_deform_types,
+};
+
+enum lfo_trigger_mode
 {
    lm_freerun = 0,
    lm_keytrigger,
    lm_random,
-   n_lfomodes,
+
+   n_lfo_trigger_modes,
 };
 
-const char lfo_mode_names[n_lfomodes][16] =
+const char lfo_trigger_mode_names[n_lfo_trigger_modes][16] =
 {
    "Freerun",
    "Keytrigger",
@@ -169,28 +180,30 @@ enum character_mode
    cm_warm = 0,
    cm_neutral,
    cm_bright,
-   n_charactermodes,
+
+   n_character_modes,
 };
-const char character_names[n_charactermodes][16] =
+const char character_names[n_character_modes][16] =
 {
    "Warm",
    "Neutral",
    "Bright",
 };
 
-enum osc_types
+enum osc_type
 {
    ot_classic = 0,
-   ot_sinus,
+   ot_sine,
    ot_wavetable,
    ot_shnoise,
    ot_audioinput,
-   ot_FM3, // it used to just FM, then the UI called it FM3, so name it this way but this order has to stick
+   ot_FM3, // it used to be just FM, then the UI called it FM3, so name it like this, but the order of enums has to stick
    ot_FM2,
-   ot_WT2,
-   num_osctypes,
+   ot_window,
+
+   n_osc_types,
 };
-const char osc_type_names[num_osctypes][16] =
+const char osc_type_names[n_osc_types][16] =
 {
    "Classic",
    "Sine",
@@ -220,13 +233,37 @@ inline bool uses_wavetabledata(int i)
    switch (i)
    {
    case ot_wavetable:
-   case ot_WT2:
+   case ot_window:
       return true;
    }
    return false;
 }
 
-enum fx_types
+enum fxslot_positions {
+   fxslot_ains1,
+   fxslot_ains2,
+   fxslot_bins1,
+   fxslot_bins2,
+   fxslot_send1,
+   fxslot_send2,
+   fxslot_global1,
+   fxslot_global2
+};
+
+const char fxslot_names[8][NAMECHARS] =
+{
+   "A Insert FX 1",
+   "A Insert FX 2",
+   "B Insert FX 1",
+   "B Insert FX 2",
+   "Send FX 1",
+   "Send FX 2",
+   "Global FX 1",
+   "Global FX 2",
+};
+
+
+enum fx_type
 {
    fxt_off = 0,
    fxt_delay,
@@ -243,9 +280,10 @@ enum fx_types
    fxt_flanger,
    fxt_ringmod,
    fxt_airwindows,
-   num_fxtypes,
+
+   n_fx_types,
 };
-const char fx_type_names[num_fxtypes][16] =
+const char fx_type_names[n_fx_types][16] =
 {
    "Off",
    "Delay",
@@ -270,31 +308,33 @@ enum fx_bypass
    fxb_no_sends,
    fxb_scene_fx_only,
    fxb_no_fx,
+
    n_fx_bypass,
 };
 
-const char fxbypass_names[n_fx_bypass][16] =
+const char fxbypass_names[n_fx_bypass][32] =
 {
    "All FX",
    "No Send FX",
-   "Scene FX Only",
+   "No Send And Global FX",
    "All FX Off",
 };
 
-enum fb_configuration
+enum filter_config
 {
-   fb_serial = 0,
-   fb_serial2,
-   fb_serial3,
-   fb_dual,
-   fb_dual2,
-   fb_stereo,
-   fb_ring,
-   fb_wide,
-   n_fb_configuration,
+   fc_serial1 = 0,
+   fc_serial2,
+   fc_serial3,
+   fc_dual1,
+   fc_dual2,
+   fc_stereo,
+   fc_ring,
+   fc_wide,
+
+   n_filter_configs,
 };
 
-const char fbc_names[n_fb_configuration][16] =
+const char fbc_names[n_filter_configs][16] =
 {
    "Serial 1",
    "Serial 2",
@@ -306,16 +346,17 @@ const char fbc_names[n_fb_configuration][16] =
    "Wide",
 };
 
-enum fm_configuration
+enum fm_routing
 {
    fm_off = 0,
    fm_2to1,
    fm_3to2to1,
    fm_2and3to1,
-   n_fm_configuration,
+
+   n_fm_routings,
 };
 
-const char fmc_names[n_fm_configuration][16] =
+const char fmr_names[n_fm_routings][16] =
 {
    "Off",
    "2 > 1",
@@ -323,22 +364,23 @@ const char fmc_names[n_fm_configuration][16] =
    "2 > 1 < 3",
 };
 
-enum lfoshapes
+enum lfo_type
 {
-   ls_sine = 0,
-   ls_tri,
-   ls_square,
-   ls_ramp,
-   ls_noise,
-   ls_snh,
-   ls_constant1,
-   ls_stepseq,
-   ls_mseg,
-   // ls_formula,
-   n_lfoshapes
+   lt_sine = 0,
+   lt_tri,
+   lt_square,
+   lt_ramp,
+   lt_noise,
+   lt_snh,
+   lt_envelope,
+   lt_stepseq,
+   lt_mseg,
+   lt_function,
+
+   n_lfo_types,
 };
 
-const char ls_names[n_lfoshapes][16] =
+const char lt_names[n_lfo_types][32] =
 {
    "Sine",
    "Triangle",
@@ -349,122 +391,41 @@ const char ls_names[n_lfoshapes][16] =
    "Envelope",
    "Step Sequencer",
    "MSEG",
+   "Function (coming in 1.9!)",
 };
 
-enum fu_type
+const int lt_num_deforms[n_lfo_types] =
 {
-   fut_none = 0,
-   fut_lp12,
-   fut_lp24,
-   fut_lpmoog,
-   fut_hp12,
-   fut_hp24,
-   fut_bp12,
-   fut_br12,
-   fut_comb,
-   fut_SNH,
-   fut_vintageladder,
-   fut_obxd_2pole,
-   fut_obxd_4pole,
-   n_fu_type,
-};
-const char fut_names[n_fu_type][32] =
-{
-   "Off",
-   "Lowpass 12 dB/oct",
-   "Lowpass 24 dB/oct",
-   "Legacy Ladder",
-   "Highpass 12 dB/oct",
-   "Highpass 24 dB/oct",
-   "Bandpass",
-   "Notch",
-   "Comb",
-   "Sample & Hold",
-   "Vintage Ladder",
-   "OB-Xd 12 dB/oct",
-   "OB-Xd 24 dB/oct",
+   3,   // lt_sine
+   3,   // lt_tri
+   0,   // lt_square
+   3,   // lt_ramp
+   0,   // lt_noise
+   0,   // lt_snh
+   3,   // lt_envelope
+   0,   // lt_stepseq
+   0,   // lt_mseg
+   3,   // lt_function
 };
 
-const char fut_bp_subtypes[6][32] =
-{
-   "Clean 12 dB/oct",
-   "Driven 12 dB/oct",
-   "Smooth 12 dB/oct",
-   "Clean 24 dB/oct",
-   "Driven 24 dB/oct",
-   "Smooth 24 dB/oct",
-};
-
-const char fut_br_subtypes[4][32] =
-{
-   "12 dB/oct",
-   "12 dB/oct Mild",
-   "24 dB/oct",
-   "24 dB/oct Mild",
-};
-
-const char fut_comb_subtypes[4][64] =
-{
-   "Positive, 50% Wet",
-   "Positive, 100% Wet",
-   "Negative, 50% Wet",
-   "Negative, 100% Wet",
-};
-
-const char fut_def_subtypes[3][32] =
-{
-   "Clean",
-   "Driven",
-   "Smooth",
-};
-
-const char fut_ldr_subtypes[4][32] =
-{
-   "6 dB/oct",
-   "12 dB/oct",
-   "18 dB/oct",
-   "24 dB/oct",
-};
-
-const char fut_vintageladder_subtypes[6][32] =
-{
-   "Strong",
-   "Strong Compensated",
-   "Dampened",
-   "Dampened Compensated",
-};
-const char fut_obxd_2p_subtypes[1][32] = {"12 dB/oct"};
-const char fut_obxd_4p_subtypes[1][32] = {"24 dB/oct"};
-
-const int fut_subcount[n_fu_type] = {0, 3, 3, 4, 3, 3, 6, 4, 4, 0, 4, 0, 0 };
-
-enum fu_subtype
-{
-   st_SVF = 0,
-   st_Rough = 1,
-   st_Smooth = 2,
-   st_Medium = 3, // disabled
-   st_SVFBP24 = 3,
-   st_RoughBP24 = 4,
-   st_SmoothBP24 = 5,
-   st_BR12 = 0,
-   st_BR12Mild = 1,
-   st_BR24 = 2,
-   st_BR24Mild = 3,
-};
+/*
+ * With 1.8 for compactness all the filter names and stuff went to a separate header
+ */
+#include "FilterConfiguration.h"
 
 enum ws_type
 {
    wst_none = 0,
-   wst_tanh,
+   wst_soft,
    wst_hard,
    wst_asym,
-   wst_sinus,
-   wst_digi,
-   n_ws_type,
+   wst_sine,
+   wst_digital,
+
+   n_ws_types,
 };
 
-const char wst_names[n_ws_type][16] =
+const char wst_names[n_ws_types][16] =
 {
    "Off",
    "Soft",
@@ -474,23 +435,56 @@ const char wst_names[n_ws_type][16] =
    "Digital",
 };
 
-enum env_mode_type
+extern float waveshapers alignas(16)[n_ws_types][1024];
+
+enum env_mode
 {
    emt_digital = 0,
    emt_analog,
-   n_em_type,
+
+   n_env_modes,
 };
 
-const char em_names[n_em_type][16] =
+const char em_names[n_env_modes][16] =
 {
    "Digital",
    "Analog",
 };
 
+enum adsr_purpose {
+   adsr_ampeg = 0,
+   adsr_filteg
+};
+
+
+/*
+ * How does the sustain pedal work in mono mode? Current modes for this are
+ *
+ * HOLD_ALL_NOTES (the default). If you release a note with the pedal down
+ * it does not release
+ *
+ * RELEASE_IF_OTHERS_HELD. If you release a note, and no other notes are down,
+ * do not release. But if you release and another note is down, return to that
+ * note (basically allow sustain pedal trills).
+ */
+enum MonoPedalMode {
+   HOLD_ALL_NOTES,
+   RELEASE_IF_OTHERS_HELD
+};
+
+enum MonoVoicePriorityMode {
+   NOTE_ON_LATEST_RETRIGGER_HIGHEST, // The legacy mode for 1.7.1 and earlier
+   ALWAYS_LATEST, // Could also be called "NOTE_ON_LATEST_RETRIGGER_LATEST"
+   ALWAYS_HIGHEST,
+   ALWAYS_LOWEST,
+};
+
+
 struct MidiKeyState
 {
    int keystate;
    char lastdetune;
+   int64_t voiceOrder;
 };
 
 struct MidiChannelState
@@ -528,7 +522,7 @@ struct OscillatorStorage : public CountedSetUserData // The counted set is the w
 struct FilterStorage
 {
    Parameter type;
-   Parameter subtype;
+   Parameter subtype; // NOTE: In SurgeSynthesizer we assume that type and subtype are adjacent in param space. See comment there.
    Parameter cutoff;
    Parameter resonance;
    Parameter envmod;
@@ -595,6 +589,8 @@ struct SurgeSceneStorage
    std::vector<ModulationSource*> modsources;
 
    bool modsource_doprocess[n_modsources];
+
+   MonoVoicePriorityMode monoVoicePriorityMode = ALWAYS_LATEST;
 };
 
 const int n_stepseqsteps = 16;
@@ -614,17 +610,48 @@ struct MSEGStorage {
       float v0;
       float dragv0; // in snap mode, this is the location we are dragged to. It is just convenience storage.
       float nv1; // this is the v0 of the neighbor and is here just for convenience. MSEGModulationHelper::rebuildCache will set it
-      float cpduration, cpv, dragcpv;
+      float dragv1; // only used in the endpoint
+      float cpduration, cpv, dragcpv, dragcpratio = 0.5;
+      bool  useDeform = true;
+      bool  invertDeform = false;
       enum Type {
          LINEAR = 1,
          QUAD_BEZIER,
          SCURVE,
          SINE,
-         STEPS,
+         STAIRS,
          BROWNIAN,
          SQUARE,
+         TRIANGLE,
+         HOLD,
+         SAWTOOTH,
+         RESERVED,  // used to be Spike, but it broke some MSEG model constraints, so we ditched it - can add a different curve type later on!
+         BUMP,
+         SMOOTH_STAIRS,
       } type;
    };
+
+   // These values are streamed so please don't change the integer values
+   enum EndpointMode {
+      LOCKED = 1,
+      FREE = 2
+   } endpointMode = FREE;
+
+   // These values are streamed so please don't change the integer values
+   enum EditMode {
+       ENVELOPE = 0,    // no constraints on horizontal time axis
+       LFO = 1,         // MSEG editing is constrained to just one phase unit (0 ... 1), useful for single cycle waveform editing
+   } editMode = ENVELOPE;
+
+   // These values are streamed so please don't change the integer values
+   enum LoopMode {
+      ONESHOT = 1,      // Play the MSEG front to back and then output the final value
+      LOOP = 2,         // Play the MSEG front to loop end and then return to loop start
+      GATED_LOOP = 3    // Play the MSEG front to loop end, then return to loop start, but if at any time
+                        // a note off is generated, jump to loop end at current value and progress to end once
+   } loopMode = LOOP;
+
+   int loop_start = -1, loop_end = -1; // -1 signifies the entire MSEG in this context
 
    int n_activeSegments = 0;
    std::array<segment, max_msegs> segments;
@@ -633,15 +660,29 @@ struct MSEGStorage {
    // If you edit the segments then MSEGModulationHelper::rebuildCache can rebuild them
    float totalDuration;
    std::array<float, max_msegs> segmentStart, segmentEnd;
+   float durationToLoopEnd;
+   float durationLoopStartToLoopEnd;
+   float envelopeModeDuration = -1, envelopeModeNV1 = -2; // -2 as sentinel since NV1 is -1/1
 
-   // These are values used by the editor which are per mseg but not persisted
-   float vSnap = 0, hSnap = 0, vSnapDefault = 0.25, hSnapDefault = 0.1;
+   /*
+    * These "UI" type things we decided, late in 18, are actually a critical part of
+    * the modelling experience, so even if they aren't required to actually evaluate
+    * the model, we decided to move them to the model and the patch, rather than the
+    * dawExtraState. Note that vSnap and hSnap are also streamed into the DES at write
+    * time and optionaly streamed out based on a user pref.
+    */
+   static constexpr float defaultVSnapDefault = 0.25, defaultHSnapDefault = 0.125;
+   float vSnapDefault = defaultVSnapDefault, hSnapDefault = defaultHSnapDefault;
+   float vSnap = 0, hSnap = 0;
+   float axisWidth = -1, axisStart = -1;
 
-   static constexpr float minimumDuration = 0.001;
+   static constexpr float minimumDuration = 0.0;
 };
 
 struct FormulaModulatorStorage { // Currently an unused placeholder
 };
+
+
 
 /*
 ** There are a collection of things we want your DAW to save about your particular instance
@@ -652,7 +693,36 @@ struct DAWExtraStateStorage
 {
    bool isPopulated = false;
 
-   int instanceZoomFactor = -1;
+   /*
+    * Here's the prescription to add something to the editor state
+    *
+    * 1. Add it here with a reasonable default.
+    * 2. In the SurgeGUIEditor Constructor, read off the value
+    * 3. In SurgeGUIEditor::populateDawExtraState write it
+    * 4. In SurgeGUIEditor::loadDawExtraState read it (this will probably be pretty similar to
+    *    the constructor code in step 4, but this is the step when restoring, as opposed to creating
+    *    an object).
+    * 5. In SurgePatch load/save XML write and read it
+    *
+    * Then the state will survive create/destroy and save/restore
+    */
+   struct EditorState
+   {
+      int instanceZoomFactor = -1;
+      int current_scene = 0;
+      int current_fx = 0;
+      int current_osc[n_scenes] = {0};
+      modsources modsource = ms_lfo1, modsource_editor[n_scenes] = {ms_lfo1, ms_lfo1};
+      bool isMSEGOpen = false;
+
+      bool msegStateIsPopulated = false;
+      struct
+      {
+         int timeEditMode = 0;
+      } msegEditState[n_scenes][n_lfos];
+   } editor;
+
+
    bool mpeEnabled = false;
    int mpePitchBendRange = -1;
 
@@ -664,6 +734,8 @@ struct DAWExtraStateStorage
 
    std::unordered_map<int, int> midictrl_map; // param -> midictrl
    std::unordered_map<int, int> customcontrol_map; // custom controller number -> midicontrol
+
+   int monoPedalMode = 0;
 };
 
 
@@ -694,23 +766,29 @@ public:
    unsigned int save_xml(void** data);
    unsigned int save_RIFF(void** data);
 
+   // Factor these so the LFO Preset Mechanism can use them also
+   void msegToXMLElement( MSEGStorage *ms, TiXmlElement &parent ) const;
+   void msegFromXMLElement( MSEGStorage *ms, TiXmlElement *parent, bool restoreSnaps ) const;
+   void stepSeqToXmlElement( StepSequencerStorage *ss, TiXmlElement &parent, bool streamMask ) const;
+   void stepSeqFromXmlElement( StepSequencerStorage *ss, TiXmlElement *parent ) const;
+
    void load_patch(const void* data, int size, bool preset);
    unsigned int save_patch(void** data);
 
    // data
-   SurgeSceneStorage scene[2], morphscene;
+   SurgeSceneStorage scene[n_scenes], morphscene;
    FxStorage fx[n_fx_slots];
    // char name[NAMECHARS];
-   int scene_start[2], scene_size;
-   Parameter scene_active, scenemode, scenemorph, splitkey;
+   int scene_start[n_scenes], scene_size;
+   Parameter scene_active, scenemode, scenemorph, splitpoint;  // streaming name for splitpoint is splitkey (due to legacy)
    Parameter volume;
    Parameter polylimit;
    Parameter fx_bypass, fx_disable;
    Parameter character;
 
-   StepSequencerStorage stepsequences[2][n_lfos];
-   MSEGStorage msegs[2][n_lfos];
-   FormulaModulatorStorage formulamods[2][n_lfos];
+   StepSequencerStorage stepsequences[n_scenes][n_lfos];
+   MSEGStorage msegs[n_scenes][n_lfos];
+   FormulaModulatorStorage formulamods[n_scenes][n_lfos];
 
    PatchTuningStorage patchTuning;
    DAWExtraStateStorage dawExtraState;
@@ -719,7 +797,7 @@ public:
    std::vector<int> easy_params_id;
 
    std::vector<ModulationRouting> modulation_global;
-   pdata scenedata[2][n_scene_params];
+   pdata scenedata[n_scenes][n_scene_params];
    pdata globaldata[n_global_params];
    void* patchptr;
    SurgeStorage* storage;
@@ -731,6 +809,19 @@ public:
 
    int streamingRevision;
    int currentSynthStreamingRevision;
+
+   /*
+   * This parameter exists for the very special reason of maintaing compatibility with
+   * comb filter tuning for streaming versions which are older than Surge v1.8.
+   * Prior to that, the comb filter had a calculation error in the time and was out of tune,
+   * but that lead to a unique sound in existing patches. So we introduce this parameter
+   * which allows us to leave old patches mis-tuned in FilterCoefficientMaker and is handled
+   * properly at stream time and so on.
+   */
+   bool correctlyTuneCombFilter = true;
+
+   FilterSelectorMapper patchFilterSelectorMapper;
+
 };
 
 struct Patch
@@ -761,8 +852,10 @@ enum surge_copysource
    cp_osc,
    cp_lfo,
    cp_oscmod,
+
    n_copysources,
 };
+
 
 /* STORAGE layer			*/
 
@@ -796,13 +889,13 @@ public:
    double songpos;
    void init_tables();
    float nyquist_pitch;
-   int last_key[2];
+   int last_key[2]; // TODO: FIX SCENE ASSUMPTION?
    TiXmlElement* getSnapshotSection(const char* name);
    void load_midi_controllers();
    void save_midi_controllers();
    void save_snapshots();
    int controllers[n_customcontrollers];
-   float poly_aftertouch[2][128];
+   float poly_aftertouch[2][128];  // TODO: FIX SCENE ASSUMPTION?
    float modsource_vu[n_modsources];
    void refresh_wtlist();
    void refresh_wtlistAddDir(bool userDir, std::string subdir);
@@ -858,7 +951,8 @@ public:
    void storeMidiMappingToName( std::string name );
 
    // float table_sin[512],table_sin_offset[512];
-   std::mutex waveTableDataMutex, modRoutingMutex;
+   std::mutex waveTableDataMutex;
+   std::recursive_mutex modRoutingMutex;
    Wavetable WindowWT;
 
    float note_to_pitch(float x);
@@ -893,6 +987,11 @@ public:
    bool isStandardMapping = true;
    float tuningPitch = 32.0f, tuningPitchInv = 0.03125f;
 
+   ControllerModulationSource::SmoothingMode smoothingMode = ControllerModulationSource::SmoothingMode::LEGACY;
+   ControllerModulationSource::SmoothingMode pitchSmoothingMode =
+       ControllerModulationSource::SmoothingMode::LEGACY;
+   float mpePitchBendRange = -1.0f;
+
    std::atomic<int> otherscene_clients;
 
    std::unordered_map<int, std::string> helpURL_controlgroup;
@@ -900,6 +999,9 @@ public:
    std::unordered_map<std::string, std::string> helpURL_specials;
    // Alterhately make this unordered and provide a hash
    std::map<std::pair<std::string,int>, std::string> helpURL_paramidentifier_typespecialized;
+
+   int subtypeMemory[n_scenes][n_filterunits_per_scene][n_fu_types];
+   MonoPedalMode monoPedalMode = HOLD_ALL_NOTES;
 
 private:
    TiXmlDocument snapshotloader;
@@ -910,11 +1012,9 @@ private:
    std::vector<ModulationRouting> clipboard_modulation_scene, clipboard_modulation_voice;
    Wavetable clipboard_wt[n_oscs];
 
-#if TARGET_LV2
 public:
-   // whether to skip loading, desired while exporting manifests
+   // whether to skip loading, desired while exporting manifests. Only used by LV2 currently.
    static bool skipLoadWtAndPatch;
-#endif
 };
 
 float db_to_linear(float);

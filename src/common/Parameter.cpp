@@ -283,6 +283,7 @@ bool Parameter::can_be_absolute()
    {
    case ct_oscspread:
    case ct_pitch_semi7bp_absolutable:
+   case ct_fmratio:
       return true;
    }
    return false;
@@ -296,7 +297,8 @@ bool Parameter::can_deactivate()
    case ct_freq_audible_deactivatable:
    case ct_lforate_deactivatable:
    case ct_rotarydrive:
-   case ct_airwindow_fx:
+   case ct_airwindows_fx:
+   case ct_decibel_deactivatable:
       return true;
    }
    return false;
@@ -308,6 +310,15 @@ bool Parameter::has_portaoptions()
       return true;
    else
       return false;
+}
+
+bool Parameter::has_deformoptions()
+{
+   if (ctrltype == ct_lfodeform)
+      return true;
+   else
+      return false;
+
 }
 
 void Parameter::set_user_data(ParamUserData* ud)
@@ -324,7 +335,8 @@ void Parameter::set_user_data(ParamUserData* ud)
          user_data = nullptr;
       }
       break;
-   case ct_airwindow_fx:
+   case ct_airwindows_fx:
+   case ct_filtertype:
       if( dynamic_cast<ParameterDiscreteIndexRemapper*>(ud))
       {
          user_data = ud;
@@ -334,9 +346,9 @@ void Parameter::set_user_data(ParamUserData* ud)
          user_data = nullptr;
       }
       break;
-   case ct_airwindow_param:
-   case ct_airwindow_param_bipolar:
-   case ct_airwindow_param_integral:
+   case ct_airwindows_param:
+   case ct_airwindows_param_bipolar:
+   case ct_airwindows_param_integral:
       if( dynamic_cast<ParameterExternalFormatter*>(ud))
       {
          user_data = ud;
@@ -347,7 +359,7 @@ void Parameter::set_user_data(ParamUserData* ud)
       }
       break;
    default:
-      std::cerr << "Setting userdata on a non-supporting param ignored" << std::endl;
+      std::cout << "Setting userdata on a non-supporting param ignored" << std::endl;
       user_data = nullptr;
       break;
    }
@@ -412,7 +424,6 @@ void Parameter::set_type(int ctrltype)
       val_min.f = -60;
       val_max.f = 70;
       val_default.f = 3;
-      // val_max.f = 76;
       break;
    case ct_freq_hpf:
       valtype = vt_float;
@@ -453,6 +464,7 @@ void Parameter::set_type(int ctrltype)
       break;
    case ct_decibel:
    case ct_decibel_extendable:
+   case ct_decibel_deactivatable:
       valtype = vt_float;
       val_min.f = -48;
       val_max.f = 48;
@@ -533,7 +545,7 @@ void Parameter::set_type(int ctrltype)
    case ct_lfotrigmode:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = n_lfomodes - 1;
+      val_max.i = n_lfo_trigger_modes - 1;
       val_default.i = 0;
       break;
    case ct_pitch_octave:
@@ -560,7 +572,7 @@ void Parameter::set_type(int ctrltype)
       valtype = vt_int;
       val_min.i = 0;
       val_default.i = 0;
-      val_max.i = num_osctypes - 1;
+      val_max.i = n_osc_types - 1;
       affect_other_parameters = true;
       break;
    case ct_reverbshape:
@@ -573,7 +585,7 @@ void Parameter::set_type(int ctrltype)
       valtype = vt_int;
       val_min.i = 0;
       val_default.i = 0;
-      val_max.i = num_fxtypes - 1;
+      val_max.i = n_fx_types - 1;
       // affect_other_parameters = true;	// Can not be added, before it has a custom
       // controltype
       break;
@@ -608,40 +620,40 @@ void Parameter::set_type(int ctrltype)
       val_max.f = 120;
       val_default.f = 90;
       break;
-   case ct_lfoshape:
+   case ct_lfotype:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = n_lfoshapes - 1;
+      val_max.i = n_lfo_types - 1;
       val_default.i = 0;
       break;
    case ct_fbconfig:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = n_fb_configuration - 1;
+      val_max.i = n_filter_configs - 1;
       val_default.i = 0;
       break;
    case ct_fmconfig:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = n_fm_configuration - 1;
+      val_max.i = n_fm_routings - 1;
       val_default.i = 0;
       break;
    case ct_filtertype:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = n_fu_type - 1;
+      val_max.i = n_fu_types - 1;
       val_default.i = 0;
       break;
    case ct_filtersubtype:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = 5;
+      val_max.i = n_max_filter_subtypes - 1;
       val_default.i = 0;
       break;
    case ct_wstype:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = n_ws_type - 1;
+      val_max.i = n_ws_types - 1;
       val_default.i = 0;
       break;
    case ct_midikey_or_channel:
@@ -667,20 +679,20 @@ void Parameter::set_type(int ctrltype)
    case ct_scenemode:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = n_scenemodes - 1;
+      val_max.i = n_scene_modes - 1;
       val_default.i = 0;
       break;
    case ct_polymode:
       valtype = vt_int;
       val_min.i = 0;
-      val_max.i = n_polymodes - 1;
+      val_max.i = n_play_modes - 1;
       val_default.i = 0;
       break;
    case ct_polylimit:
       valtype = vt_int;
       val_min.i = 2;
       val_max.i = 64;
-      val_default.i = 8;
+      val_default.i = 16;
       break;
    case ct_scenesel:
       valtype = vt_int;
@@ -706,7 +718,14 @@ void Parameter::set_type(int ctrltype)
       valtype = vt_float;
       val_default.f = 0;
       break;
+   case ct_lfodeform:
+      val_min.f = -1;
+      val_max.f = 1;
+      valtype = vt_float;
+      val_default.f = 0;
+      break;
    case ct_amplitude:
+   case ct_amplitude_clipper:
    case ct_lfoamplitude:
       val_min.f = 0;
       val_max.f = 1;
@@ -752,7 +771,7 @@ void Parameter::set_type(int ctrltype)
       break;
    case ct_distortion_waveshape:
       val_min.i = 0;
-      val_max.i = n_ws_type - 2; // we want to skip none also
+      val_max.i = n_ws_types - 2; // we want to skip none also
       valtype = vt_int;
       val_default.i = 0;
       break;
@@ -810,7 +829,7 @@ void Parameter::set_type(int ctrltype)
       val_default.f = 0;
       break;
    case ct_phaser_stages:
-      val_min.i = 2;
+      val_min.i = 1;
       val_max.i = 16;
       valtype = vt_int;
       val_default.i = 4;
@@ -827,25 +846,31 @@ void Parameter::set_type(int ctrltype)
       valtype = vt_float;
       val_default.f = 0;
       break;
-   case ct_airwindow_fx:
+   case ct_airwindows_fx:
       val_min.i = 0;
       val_max.i = 10;
       valtype = vt_int;
       val_default.i = 0;
       break;
-   case ct_airwindow_param:
-   case ct_airwindow_param_bipolar: // it's still 0,1; this is just a display thing
+   case ct_airwindows_param:
+   case ct_airwindows_param_bipolar: // it's still 0,1; this is just a display thing
       val_min.f = 0;
       val_max.f = 1;
       valtype = vt_float;
       val_default.f = 0;
       break;
 
-   case ct_airwindow_param_integral:
+   case ct_airwindows_param_integral:
       val_min.i = 0;
       val_max.i = 1;
       valtype = vt_int;
       val_default.i = 0;
+      break;
+   case ct_phaser_spread:
+      val_min.f = 0;
+      val_max.f = 1;
+      valtype = vt_float;
+      val_default.f = 0.5;
       break;
 
    case ct_none:
@@ -876,6 +901,7 @@ void Parameter::set_type(int ctrltype)
    case ct_percent:
    case ct_percent200:
    case ct_percent_bidirectional:
+   case ct_lfodeform:
    case ct_rotarydrive:
    case ct_countedset_percent:
    case ct_lfoamplitude:
@@ -883,7 +909,6 @@ void Parameter::set_type(int ctrltype)
       sprintf(displayInfo.unit, "%%" );
       displayInfo.scale = 100;
       break;
-
    case ct_percent_bidirectional_stereo:
       displayType = LinearWithScale;
       displayInfo.customFeatures = ParamDisplayFeatures::kHasCustomMinString |
@@ -983,6 +1008,7 @@ void Parameter::set_type(int ctrltype)
    case ct_decibel_fmdepth:
    case ct_decibel_narrow:
    case ct_decibel_extra_narrow:
+   case ct_decibel_deactivatable:
       displayType = LinearWithScale;
       sprintf(displayInfo.unit, "dB");
       break;
@@ -1022,14 +1048,15 @@ void Parameter::set_type(int ctrltype)
       break;
 
    case ct_amplitude:
+   case ct_amplitude_clipper:
    case ct_sendlevel:
       displayType = Decibel;
       sprintf( displayInfo.unit, "dB" );
       break;
 
-   case ct_airwindow_param:
-   case ct_airwindow_param_bipolar:
-   case ct_airwindow_param_integral:
+   case ct_airwindows_param:
+   case ct_airwindows_param_bipolar:
+   case ct_airwindows_param_integral:
       displayType = DelegatedToFormatter;
       displayInfo.scale = 1.0;
       displayInfo.unit[0] = 0;
@@ -1079,6 +1106,9 @@ void Parameter::bound_value(bool force_integer)
       case ct_osc_feedback_negative:
       case ct_detuning:
       case ct_lfoamplitude:
+      case ct_airwindows_param:
+      case ct_airwindows_param_bipolar:
+      case ct_lfodeform:
       {
          val.f = floor(val.f * 100) / 100.0;
          break;
@@ -1088,7 +1118,8 @@ void Parameter::bound_value(bool force_integer)
       case ct_syncpitch:
       {
          if (!extend_range) {
-            val.f = floor(val.f + 0.5f); }
+            val.f = floor(val.f + 0.5f);
+         }
 
          break;
       }
@@ -1130,6 +1161,7 @@ void Parameter::bound_value(bool force_integer)
          break;
       }
       case ct_amplitude:
+      case ct_amplitude_clipper:
       case ct_sendlevel:
       {
          if (val.f != 0)
@@ -1153,6 +1185,7 @@ void Parameter::bound_value(bool force_integer)
       case ct_decibel_attenuation_large:
       case ct_decibel_fmdepth:
       case ct_decibel_extendable:
+      case ct_decibel_deactivatable:
       {
          val.f = floor(val.f);
          break;
@@ -1334,9 +1367,9 @@ float Parameter::get_extended(float f)
    case ct_fmratio:
    {
       if( f > 16 )
-         return ( ( f - 16 ) * 2  + 1 );
+         return ( ( f - 16 ) * 31.f / 16.f  + 1 );
       else
-         return -( ( 16 - f ) * 2 + 1 );
+         return -( ( 16 - f ) * 31.f / 16.f + 1 );
    }
    default:
       return f;
@@ -1691,6 +1724,47 @@ void Parameter::get_display_of_modulation_depth(char *txt, float modulationDepth
    {
    case ct_fmratio:
    {
+      if( absolute )
+      {
+         float bpv = (f - 16.0) / 16.0;
+         float bpu = ( f + modulationDepth - 16.0 ) / 16.0;
+         float bpd = ( f - modulationDepth - 16.0 ) / 16.0;
+         float mul = 69;
+         float note = 69 + mul * bpv;
+         float noteup = 69 + mul * bpu;
+         float notedn = 60 + mul * bpd;
+
+         auto freq = 440.0 * pow(2.0, (note - 69.0) / 12);
+         auto frequp = 440.0 * pow( 2.0, (noteup - 69.0) / 12 );
+         auto freqdn = 440.0 * pow( 2.0, (notedn - 69.0 ) / 12);
+         int dp = (detailedMode ? 6 : 2);
+
+         switch( displaymode )
+         {
+         case TypeIn:
+         case Menu:
+            sprintf( txt, "%.*f Hz", dp, frequp - freq );
+            break;
+         case InfoWindow:
+            if( iw )
+            {
+               auto put = [dp](std::string &tg, float val) {
+                  char txt[256];
+                  sprintf( txt, "%.*f Hz", dp, val );
+                  tg = txt;
+               };
+               put( iw->val, freq );
+               put( iw->valplus, frequp );
+               put( iw->valminus, freqdn );
+               put( iw->dvalplus, frequp - freq);
+               put( iw->dvalminus, freq - freqdn );
+               sprintf( txt, "%.*f Hz %.*f Hz %.*f Hz", dp, freqdn, dp, freq, dp, frequp);
+               break;
+            }
+
+         }
+         return;
+      }
       float mf = modulationDepth;
       // OK so this is already handed to us extended and this one is wierd so
       auto qq = mf;
@@ -1703,7 +1777,7 @@ void Parameter::get_display_of_modulation_depth(char *txt, float modulationDepth
          else {
             qq = mf - 1;
          }
-         qq = ( qq + 32 ) / 64;
+         qq = ( qq + 31 ) / 64;
       }
       float exmf = qq;
       int dp = (detailedMode ? 6 : 2);
@@ -1781,7 +1855,7 @@ void Parameter::get_display_of_modulation_depth(char *txt, float modulationDepth
                   else
                      sprintf( dtxt, "C : %.*f", dp, dnval );
                   iw->valminus = dtxt;
-                  
+
                   sprintf( dtxt, "%.*f", dp, -( qq * 32 ) );
                   iw->dvalminus = dtxt;
                }
@@ -2048,14 +2122,28 @@ void Parameter::get_display(char* txt, bool external, float ef)
       {
       case ct_fmratio:
       {
-         auto q = get_extended(f);
-         if( extend_range && q < 0 )
+         if( absolute )
          {
-            sprintf(txt, "C : 1 / %.*f", (detailedMode ? 6 : 2), -get_extended(f));
+            /*
+             * OK so I am 0 to 32. So lets define a note
+             */
+            float bpv = (f - 16.0) / 16.0;
+            auto note = 69 + 69 * bpv;
+            auto freq = 440.0 * pow(2.0, (note - 69.0) / 12);
+            sprintf(txt, "%.*f Hz", (detailedMode ? 6 : 2), freq);
          }
          else
          {
-            sprintf(txt, "C : %.*f", (detailedMode ? 6 : 2), get_extended(f));
+            auto q = get_extended(f);
+
+            if (extend_range && q < 0)
+            {
+               sprintf(txt, "C : 1 / %.*f", (detailedMode ? 6 : 2), -get_extended(f));
+            }
+            else
+            {
+               sprintf(txt, "C : %.*f", (detailedMode ? 6 : 2), get_extended(f));
+            }
          }
          break;
       }
@@ -2067,13 +2155,13 @@ void Parameter::get_display(char* txt, bool external, float ef)
    case vt_int:
    {
       if (external)
-         i = (int)((1 / 0.99) * (ef - 0.005) * (float)(val_max.i - val_min.i) + 0.5) + val_min.i;
+         i = Parameter::intUnscaledFromFloat(ef, val_max.i, val_min.i );
       else
          i = val.i;
 
       if( displayType == DelegatedToFormatter )
       {
-         float fv = 0.005 + 0.99 * ((float)(i - val_min.i)) / ((float)(val_max.i - val_min.i));
+         float fv = Parameter::intScaledToFloat(i, val_max.i, val_min.i );
 
          char vt[64];
 
@@ -2107,7 +2195,7 @@ void Parameter::get_display(char* txt, bool external, float ef)
          break;
       }
       case ct_osctype:
-         sprintf(txt, "%s", osc_type_names[limit_range(i, 0, (int)num_osctypes - 1)]);
+         sprintf(txt, "%s", osc_type_names[limit_range(i, 0, (int)n_osc_types - 1)]);
          break;
       case ct_wt2window:
          sprintf(txt, "%s", window_names[limit_range(i, 0, 8)]);
@@ -2117,7 +2205,7 @@ void Parameter::get_display(char* txt, bool external, float ef)
          sprintf(txt, "%d voice%s", i, (i > 1 ? "s" : ""));
          break;
       case ct_fxtype:
-         sprintf(txt, "%s", fx_type_names[limit_range(i, 0, (int)num_fxtypes - 1)]);
+         sprintf(txt, "%s", fx_type_names[limit_range(i, 0, (int)n_fx_types - 1)]);
          break;
       case ct_reverbshape:
          sprintf(txt, "Type %d", i + 1);
@@ -2126,7 +2214,7 @@ void Parameter::get_display(char* txt, bool external, float ef)
          sprintf(txt, "%s", fxbypass_names[limit_range(i, 0, (int)n_fx_bypass - 1)]);
          break;
       case ct_filtertype:
-         sprintf(txt, "%s", fut_names[limit_range(i, 0, (int)n_fu_type - 1)]);
+         sprintf(txt, "%s", fut_names[limit_range(i, 0, (int)n_fu_types - 1)]);
          break;
       case ct_filtersubtype:
       {
@@ -2137,69 +2225,120 @@ void Parameter::get_display(char* txt, bool external, float ef)
                if (id == patch.scene[scene].filterunit[unit].subtype.id)
                {
                   int type = patch.scene[scene].filterunit[unit].type.val.i;
-
-                  switch (type)
+                  fu_type fType = (fu_type)type;
+                  if (i >= fut_subcount[type])
+                  {
+                     sprintf( txt, "None" );
+                  }
+                  else switch (fType)
                   {
                   case fut_lpmoog:
+                  case fut_diode:
                      sprintf(txt, "%s", fut_ldr_subtypes[i]);
                      break;
                   case fut_bp12:
+                  case fut_bp24:
                      sprintf(txt, "%s", fut_bp_subtypes[i]);
                      break;
-                  case fut_br12:
-                     sprintf(txt, "%s", fut_br_subtypes[i]);
+                  case fut_notch12:
+                  case fut_notch24:
+                  case fut_apf:
+                     sprintf(txt, "%s", fut_notch_subtypes[i]);
                      break;
-                  case fut_comb:
+                  case fut_comb_pos:
+                  case fut_comb_neg:
                      sprintf(txt, "%s", fut_comb_subtypes[i]);
                      break;
                   case fut_vintageladder:
-                     sprintf( txt, "%s", fut_vintageladder_subtypes[i]);
+                     sprintf(txt, "%s", fut_vintageladder_subtypes[i]);
                      break;
-                  case fut_obxd_2pole:
-                     sprintf( txt, "%s", fut_obxd_2p_subtypes[i]);
+                  case fut_obxd_2pole_lp:
+                  case fut_obxd_2pole_hp:
+                  case fut_obxd_2pole_n:
+                  case fut_obxd_2pole_bp:
+                     sprintf(txt, "%s", fut_obxd_2p_subtypes[i]);
                      break;
                   case fut_obxd_4pole:
-                     sprintf( txt, "%s", fut_obxd_4p_subtypes[i]);
+                     sprintf(txt, "%s", fut_obxd_4p_subtypes[i]);
                      break;
-#if SURGE_EXTRA_FILTERS
-#endif                     
-                  default:
+                  case fut_k35_lp:
+                  case fut_k35_hp:
+                     sprintf(txt, "%s", fut_k35_subtypes[i]);
+                     break;
+                  case fut_cutoffwarp_lp:
+                  case fut_cutoffwarp_hp:
+                  case fut_cutoffwarp_n:
+                  case fut_cutoffwarp_bp:
+                  case fut_cutoffwarp_ap:
+                  case fut_resonancewarp_lp:
+                  case fut_resonancewarp_hp:
+                  case fut_resonancewarp_n:
+                  case fut_resonancewarp_bp:
+                  case fut_resonancewarp_ap:
+                     // "i & 3" selects the lower two bits that represent the stage count.
+                     // "(i >> 2) & 3" selects the next two bits that represent the saturator.
+                     snprintf(txt, 32, "%s %s",
+                        fut_nlf_subtypes[i & 3],
+                        fut_nlf_saturators[(i >> 2) & 3]);
+                     break;
+                  // don't default any more so compiler catches new ones we add
+                  case fut_none:
+                  case fut_lp12:
+                  case fut_lp24:
+                  case fut_hp12:
+                  case fut_hp24:
+                  case fut_SNH:
                      sprintf(txt, "%s", fut_def_subtypes[i]);
+                     break;
+
+                  case n_fu_types:
+                     sprintf(txt, "ERROR" );
                      break;
                   }
                }
          break;
       }
       case ct_wstype:
-         sprintf(txt, "%s", wst_names[limit_range(i, 0, (int)n_ws_type - 1)]);
+         sprintf(txt, "%s", wst_names[limit_range(i, 0, (int)n_ws_types - 1)]);
          break;
       case ct_envmode:
-         sprintf(txt, "%s", em_names[limit_range(i, 0, (int)n_em_type - 1)]);
+         sprintf(txt, "%s", em_names[limit_range(i, 0, (int)n_env_modes - 1)]);
          break;
       case ct_fbconfig:
-         sprintf(txt, "%s", fbc_names[limit_range(i, 0, (int)n_fb_configuration - 1)]);
+         sprintf(txt, "%s", fbc_names[limit_range(i, 0, (int)n_filter_configs - 1)]);
          break;
       case ct_fmconfig:
-         sprintf(txt, "%s", fmc_names[limit_range(i, 0, (int)n_fm_configuration - 1)]);
+         sprintf(txt, "%s", fmr_names[limit_range(i, 0, (int)n_fm_routings - 1)]);
          break;
-      case ct_lfoshape:
-         sprintf(txt, "%s", ls_names[limit_range(i, 0, (int)n_lfoshapes - 1)]);
+      case ct_lfotype:
+         sprintf(txt, "%s", lt_names[limit_range(i, 0, (int)n_lfo_types - 1)]);
          break;
       case ct_scenemode:
-         sprintf(txt, "%s", scene_mode_names[limit_range(i, 0, (int)n_scenemodes - 1)]);
+         sprintf(txt, "%s", scene_mode_names[limit_range(i, 0, (int)n_scene_modes - 1)]);
          break;
       case ct_polymode:
-         sprintf(txt, "%s", play_mode_names[limit_range(i, 0, (int)n_polymodes - 1)]);
+         sprintf(txt, "%s", play_mode_names[limit_range(i, 0, (int)n_play_modes - 1)]);
          break;
       case ct_lfotrigmode:
-         sprintf(txt, "%s", lfo_mode_names[limit_range(i, 0, (int)n_lfomodes - 1)]);
+         sprintf(txt, "%s", lfo_trigger_mode_names[limit_range(i, 0, (int)n_lfo_trigger_modes - 1)]);
          break;
       case ct_character:
-         sprintf(txt, "%s", character_names[limit_range(i, 0, (int)n_charactermodes - 1)]);
+         sprintf(txt, "%s", character_names[limit_range(i, 0, (int)n_character_modes - 1)]);
          break;
       case ct_fmratio_int:
          sprintf(txt, "C : %d", i);
          break;
+      case ct_phaser_stages:
+         if (i == 1)
+         {
+            sprintf(txt, "Legacy (4 stages)");
+         }
+         else
+         {
+            sprintf(txt, "%d", i);
+         }
+            break;
+         
       case ct_envshape:
          switch(i)
          {
@@ -2253,7 +2392,7 @@ void Parameter::get_display(char* txt, bool external, float ef)
          break;
       case ct_sinefmlegacy:
          if (i == 0)
-             sprintf( txt, "Legacy (before v1.6.2)");
+             sprintf( txt, "Legacy (< v1.6.2)");
          else
              sprintf( txt, "Consistent with FM2/3" );
          break;
@@ -2261,29 +2400,7 @@ void Parameter::get_display(char* txt, bool external, float ef)
          sprintf(txt, "%d bands", i);
          break;
       case ct_distortion_waveshape:
-         // FIXME - do better than this of course
-         switch( i + 1 )
-         {
-         case wst_tanh:
-            sprintf(txt,"Soft");
-            break;
-         case wst_hard:
-            sprintf(txt,"Hard");
-            break;
-         case wst_asym:
-            sprintf(txt,"Asymmetric");
-            break;
-         case wst_sinus:
-            sprintf(txt,"Sine");
-            break;
-         case wst_digi:
-            sprintf(txt,"Digital");
-            break;
-         default:
-         case wst_none:
-            sprintf(txt,"None");
-            break;
-         }
+         sprintf(txt, "%s", wst_names[wst_soft + i]);
          break;
       case ct_oscroute:
          switch (i)
@@ -2307,16 +2424,16 @@ void Parameter::get_display(char* txt, bool external, float ef)
          switch( mode )
          {
          case 0:
-            types = "Dry Signal + Combs";
+            types = "Dry + Combs";
             break;
          case 1:
             types = "Combs Only";
             break;
          case 2:
-            types = "Dry Signal + Arpeggiated Combs";
+            types = "Dry + Arp Combs";
             break;
          case 3:
-            types = "Arpeggiated Combs Only";
+            types = "Arp Combs Only";
             break;
          }
          sprintf( txt, "%s", types.c_str() );
@@ -2347,7 +2464,7 @@ void Parameter::get_display(char* txt, bool external, float ef)
               switch(i)
               {
               case 0:
-                 type = "Mono Sum";
+                 type = "Monosum";
                  break;
               case 1:
                  type = "Left Only";
@@ -2363,7 +2480,7 @@ void Parameter::get_display(char* txt, bool external, float ef)
            }
          break;
 
-      case ct_airwindow_fx:
+      case ct_airwindows_fx:
       {
          // These are all the ones with a ParameterDiscreteIndexRemapper
          auto pd = dynamic_cast<ParameterDiscreteIndexRemapper*>(user_data);
@@ -2406,7 +2523,7 @@ float Parameter::get_value_f01()
       return (val.f - val_min.f) / (val_max.f - val_min.f);
       break;
    case vt_int:
-      return 0.005 + 0.99 * ((float)(val.i - val_min.i)) / ((float)(val_max.i - val_min.i));
+      return Parameter::intScaledToFloat(val.i, val_max.i, val_min.i );
       break;
    case vt_bool:
       return val.b ? 1.f : 0.f;
@@ -2464,8 +2581,7 @@ float Parameter::get_default_value_f01()
       return (val_default.f - val_min.f) / (val_max.f - val_min.f);
       break;
    case vt_int:
-      return 0.005 + 0.99 * ((float)(val_default.i - val_min.i)) / ((float)(val_max.i - val_min.i));
-      // return ((float)(val_default.i-val_min.i))/((float)(val_max.i - val_min.i));
+      return Parameter::intScaledToFloat(val_default.i, val_max.i, val_min.i );
       break;
    case vt_bool:
       return val_default.b ? 1.f : 0.f;
@@ -2482,7 +2598,7 @@ void Parameter::set_value_f01(float v, bool force_integer)
       val.f = v * (val_max.f - val_min.f) + val_min.f;
       break;
    case vt_int:
-      val.i = (int)((1 / 0.99) * (v - 0.005) * (float)(val_max.i - val_min.i) + 0.5) + val_min.i;
+      val.i = Parameter::intUnscaledFromFloat(v, val_max.i, val_min.i );
       break;
    case vt_bool:
       val.b = (v > 0.5f);
@@ -2579,6 +2695,7 @@ bool Parameter::can_setvalue_from_string()
    case ct_fmratio:
    case ct_syncpitch:
    case ct_amplitude:
+   case ct_amplitude_clipper:
    case ct_decibel:
    case ct_decibel_narrow:
    case ct_decibel_narrow_extendable:
@@ -2588,6 +2705,7 @@ bool Parameter::can_setvalue_from_string()
    case ct_decibel_attenuation_large:
    case ct_decibel_fmdepth:
    case ct_decibel_extendable:
+   case ct_decibel_deactivatable:
    case ct_freq_audible:
    case ct_freq_audible_deactivatable:
    case ct_freq_shift:
@@ -2604,6 +2722,7 @@ bool Parameter::can_setvalue_from_string()
    case ct_lforate:
    case ct_lforate_deactivatable:
    case ct_lfoamplitude:
+   case ct_lfodeform:
    case ct_detuning:
    case ct_oscspread:
    case ct_countedset_percent:
@@ -2618,11 +2737,12 @@ bool Parameter::can_setvalue_from_string()
    case ct_midikey:
    case ct_midikey_or_channel:
    case ct_phaser_stages:
+   case ct_phaser_spread:
    case ct_rotarydrive:
    case ct_sendlevel:
    case ct_freq_mod:
-   case ct_airwindow_param:
-   case ct_airwindow_param_bipolar:
+   case ct_airwindows_param:
+   case ct_airwindows_param_bipolar:
    {
       return true;
       break;
@@ -2830,44 +2950,55 @@ bool Parameter::set_value_from_string( std::string s )
    {
    case ct_fmratio:
    {
-      // In this case we have to set nv differently
-      const char *strip = &(c[0]);
-      while( *strip != '\0' && ! std::isdigit( *strip ) && *strip != '.' ) ++strip;
-
-      // OK so do we contain a /?
-      const char *slp;
-      if( (slp = strstr( strip, "/" )) != nullptr )
+      if( absolute )
       {
-         float num = std::atof( strip );
-         float den = std::atof( slp + 1 );
-         if( den == 0 )
-            nv = 1;
-         else
-            nv = num / den;
+         float uv = std::atof( c ) / 440.f;
+         float n = log2( uv ) * 12 + 69;
+         float bpv = ( n - 69 ) / 69.f;
+         val.f = bpv * 16 + 16;
       }
       else
       {
-         nv = std::atof( strip );
-      }
-      if( extend_range )
-      {
-         if( nv < 1 )
+         // In this case we have to set nv differently
+         const char* strip = &(c[0]);
+         while (*strip != '\0' && !std::isdigit(*strip) && *strip != '.')
+            ++strip;
+
+         // OK so do we contain a /?
+         const char* slp;
+         if ((slp = strstr(strip, "/")) != nullptr)
          {
-            float oonv = -1.0 / nv;
-            // oonv = - ( ( 16 - f ) * 2 + 1)
-            // -oonv-1 = (16-f)*2
-            // (1+oonv)/2 = f - 16;
-            // (1+oonv)/2 + 16 = f;
-            nv = 0.5 * ( 1 + oonv ) + 16;
+            float num = std::atof(strip);
+            float den = std::atof(slp + 1);
+            if (den == 0)
+               nv = 1;
+            else
+               nv = num / den;
          }
          else
          {
-            // nv = ( f - 16 ) * 2 + 1
-            // (nv - 1)/2 + 16 = f
-            nv = ( nv - 1 ) / 2 + 16;
+            nv = std::atof(strip);
          }
+         if (extend_range)
+         {
+            if (nv < 1)
+            {
+               float oonv = -1.0 / nv;
+               // oonv = - ( ( 16 - f ) * 2 + 1)
+               // -oonv-1 = (16-f)*2
+               // (1+oonv)/2 = f - 16;
+               // (1+oonv)/2 + 16 = f;
+               nv = 16.f / 31.f * (1 + oonv) + 16;
+            }
+            else
+            {
+               // nv = ( f - 16 ) * 2 + 1
+               // (nv - 1)/2 + 16 = f
+               nv = (nv - 1) * 16.f / 31.f + 16;
+            }
+         }
+         val.f = nv;
       }
-      val.f = nv;
    }
    break;
 
@@ -2978,10 +3109,25 @@ float Parameter::calculate_modulation_value_from_string( const std::string &s, b
    switch( ctrltype )
    {
    case ct_fmratio:
+      if( absolute )
+      {
+         auto dfreq = std::atof( s.c_str() );
+
+         float bpv = (val.f - 16.0) / 16.0;
+         float mul = 69;
+         float note = 69 + mul * bpv;
+         auto freq = 440.0 * pow(2.0, (note - 69.0) / 12);
+         auto tgfreq = freq + dfreq;
+         auto tgnote = log2( tgfreq / 440.0 ) * 12 + 69;
+         auto tgbpv = ( tgnote - 69 ) / mul;
+         auto dbpv = ( tgbpv - bpv ) / 2.0;
+         return dbpv;
+      }
       if( extend_range )
       {
          auto mv = (float) std::atof( s.c_str() );
-         mv = mv / 32;
+         std::cout << "MV desired is " << mv << std::endl;
+         mv = mv / 31;
          return mv;
       }
    default:

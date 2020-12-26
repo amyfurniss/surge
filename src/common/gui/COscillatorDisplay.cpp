@@ -22,7 +22,8 @@
 #include "guihelpers.h"
 #include "SkinColors.h"
 
-#include "ImportFilesystem.h"
+#include "filesystem/import.h"
+#include "guihelpers.h"
 
 using namespace VSTGUI;
 
@@ -81,7 +82,7 @@ void COscillatorDisplay::draw(CDrawContext* dc)
              auto freq = powf(2.0f, frate );
 
              smt = sin(M_PI * freq * mod_time);
-             if( lfo->shape.val.i == ls_square )
+             if( lfo->shape.val.i == lt_square )
                  smt = ( smt > 0 ? 1 : -1 );
 
              if( lfo->unipolar.val.i )
@@ -129,15 +130,16 @@ void COscillatorDisplay::draw(CDrawContext* dc)
    int averagingWindow = 4; // this must be both less than BLOCK_SIZE_OS and BLOCK_SIZE_OS must be an integer multiple of it
 
 #if LINUX
-   float valScale = 10000.0f;
-#else
-   float valScale = 100.0f;
+   Surge::UI::NonIntegralAntiAliasGuard naag(dc);
 #endif
+
+   float valScale = 100.0f;
 
    auto size = getViewSize();
 
    for (int c = 1; c >= 0; --c ) // backwards so we draw blue first
    {
+      bool use_display = false;
       Oscillator* osc = osces[c];
       CGraphicsPath* path = dc->createGraphicsPath();
       if (osc)
@@ -169,7 +171,7 @@ void COscillatorDisplay::draw(CDrawContext* dc)
                // What the hell type of scale is this folks! But this is just UI code so just punt
             }
          }
-         bool use_display = osc->allow_display();
+         use_display = osc->allow_display();
 
          // Mis-install check #2
          if (uses_wavetabledata(oscdata->type.val.i) && storage->wt_list.size() == 0)
@@ -244,9 +246,9 @@ void COscillatorDisplay::draw(CDrawContext* dc)
       if (c == 0)
       {
          // OK so draw the rules
-         CPoint mid0(0, valScale / 2.f), mid1(valScale, valScale / 2.f);
-         CPoint top0(0, valScale * 0.9), top1(valScale, valScale * 0.9);
-         CPoint bot0(0, valScale * 0.1), bot1(valScale, valScale * 0.1);
+         CPoint mid0(0.f, valScale / 2.f), mid1(valScale, valScale / 2.f);
+         CPoint top0(0.f, valScale * 0.9), top1(valScale, valScale * 0.9);
+         CPoint bot0(0.f, valScale * 0.1), bot1(valScale, valScale * 0.1);
          tf.transform(mid0);
          tf.transform(mid1);
          tf.transform(top0);
@@ -276,18 +278,19 @@ void COscillatorDisplay::draw(CDrawContext* dc)
          }
       }
 
-#if LINUX
-      dc->setLineWidth(130);
-#else
       dc->setLineWidth(1.3);
-#endif
+#if LINUX
+      dc->setDrawMode(VSTGUI::kAntiAliasing| VSTGUI::kNonIntegralMode);
+#else
       dc->setDrawMode(VSTGUI::kAntiAliasing);
+#endif
       if (c == 1)
          dc->setFrameColor(VSTGUI::CColor(100, 100, 180, 0xFF));
       else
          dc->setFrameColor(skin->getColor(Colors::Osc::Display::Wave));
 
-      dc->drawGraphicsPath(path, VSTGUI::CDrawContext::PathDrawMode::kPathStroked, &tpath);
+      if( use_display )
+         dc->drawGraphicsPath(path, VSTGUI::CDrawContext::PathDrawMode::kPathStroked, &tpath);
       dc->restoreGlobalState();
 
       path->forget();
@@ -298,7 +301,6 @@ void COscillatorDisplay::draw(CDrawContext* dc)
    if (uses_wavetabledata(oscdata->type.val.i))
    {
       CRect wtlbl(size);
-      wtlbl.right -= 1;
       wtlbl.top = wtlbl.bottom - wtbheight;
       rmenu = wtlbl;
       rmenu.inset(14, 0);
@@ -329,13 +331,11 @@ void COscillatorDisplay::draw(CDrawContext* dc)
       char* r = strrchr(wttxt, '.');
       if (r)
          *r = 0;
-      // VSTGUI::CColor fgcol = cdisurf->int_to_ccol(coltable[255]);
       VSTGUI::CColor fgcol = skin->getColor(Colors::Osc::Filename::Background);
       dc->setFillColor(fgcol);
       dc->drawRect(rmenu, kDrawFilled);
       dc->setFontColor(skin->getColor(Colors::Osc::Filename::Text));
       dc->setFont(displayFont);
-      // strupr(wttxt);
       dc->drawString(wttxt, rmenu, kCenterText, true);
 
       /*CRect wtlbl_status(size);
@@ -344,10 +344,10 @@ void COscillatorDisplay::draw(CDrawContext* dc)
       if(oscdata->wt.flags & wtf_is_sample) dc->drawString("IS
       SAMPLE",wtlbl_status,false,kRightText);*/
 
-      rnext = wtlbl;
-      rnext.left = rmenu.right; //+ 1;
       rprev = wtlbl;
-      rprev.right = rmenu.left; //- 1;
+      rprev.right = rmenu.left; // -1;
+      rnext = wtlbl;
+      rnext.left = rmenu.right; // +1;
       dc->setFillColor(fgcol);
       dc->drawRect(rprev, kDrawFilled);
       dc->drawRect(rnext, kDrawFilled);
@@ -356,19 +356,25 @@ void COscillatorDisplay::draw(CDrawContext* dc)
       dc->saveGlobalState();
 
       dc->setDrawMode(kAntiAliasing);
-      dc->setFillColor(kBlackCColor);
-      VSTGUI::CDrawContext::PointList trinext;
+      dc->setFillColor(skin->getColor(Colors::Osc::Filename::Text));
 
-      trinext.push_back(VSTGUI::CPoint(134, 170));
-      trinext.push_back(VSTGUI::CPoint(139, 174));
-      trinext.push_back(VSTGUI::CPoint(134, 178));
+      auto marginy = 2;
+      float triw = 6;
+      float trih = rprev.getHeight() - (marginy * 2);
+      float trianch = rprev.top + marginy;
+      float triprevstart = rprev.left + ((rprev.getWidth() - triw) / 2.f );
+      float trinextstart = rnext.right - ((rnext.getWidth() - triw) / 2.f );
+
+      VSTGUI::CDrawContext::PointList trinext;
+      trinext.push_back(VSTGUI::CPoint(trinextstart - triw, trianch));
+      trinext.push_back(VSTGUI::CPoint(trinextstart, trianch + (trih / 2.f)));
+      trinext.push_back(VSTGUI::CPoint(trinextstart - triw, trianch + trih));
       dc->drawPolygon(trinext, kDrawFilled);
 
       VSTGUI::CDrawContext::PointList triprev;
-
-      triprev.push_back(VSTGUI::CPoint(13, 170));
-      triprev.push_back(VSTGUI::CPoint(8, 174));
-      triprev.push_back(VSTGUI::CPoint(13, 178));
+      triprev.push_back(VSTGUI::CPoint(triprevstart + triw, trianch));
+      triprev.push_back(VSTGUI::CPoint(triprevstart, trianch + (trih / 2.f)));
+      triprev.push_back(VSTGUI::CPoint(triprevstart + triw, trianch + trih));
 
       dc->drawPolygon(triprev, kDrawFilled);
 
@@ -380,8 +386,11 @@ void COscillatorDisplay::draw(CDrawContext* dc)
 
 CMouseEventResult COscillatorDisplay::onMouseDown(CPoint& where, const CButtonState& button)
 {
-   if (!((button & kLButton) || (button & kRButton)))
+   if (listener && (button & (kMButton | kButton4 | kButton5)))
+   {
+      listener->controlModifierClicked(this, button);
       return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+   }
 
    assert(oscdata);
 
@@ -498,7 +507,7 @@ void COscillatorDisplay::populateMenu(COptionMenu* contextMenu, int selectedItem
           // FIXME - we need to find the scene and osc by iterating (gross).
           int oscNum = -1;
           int scene = -1;
-          for( int sc=0;sc<2;sc++ )
+          for (int sc = 0; sc < n_scenes; sc++)
           {
              auto s = &(storage->getPatch().scene[sc]);
              for( int o=0;o<n_oscs; ++o )

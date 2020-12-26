@@ -19,6 +19,7 @@
 #include "vstgui/lib/cpoint.h"
 #include "SkinModel.h"
 #include "SkinColors.h"
+#include "filesystem/import.h"
 
 /*
 ** Support for rudimentary skinning in Surge
@@ -71,6 +72,12 @@ private:
 namespace UI
 {
 
+/*
+ * This function is defined in SkinFontLoader.cpp
+ */
+void addFontSearchPathToSystem( const fs::path &p );
+
+extern const std::string NoneClassName;
 class SkinDB;
 
 class Skin
@@ -127,6 +134,8 @@ public:
       std::string ultimateparentclassname;
       props_t allprops;
 
+      bool parentResolved = false;
+
       std::string toString() const {
          std::ostringstream oss;
 
@@ -172,6 +181,9 @@ public:
    {
       return getColor( id, Surge::Skin::Color::colorByName(id));
    }
+
+   VSTGUI::CColor colorFromHexString( const std::string &hex ) const;
+
    private:
       VSTGUI::CColor getColor(const Surge::Skin::Color &id, const VSTGUI::CColor &def, std::unordered_set<std::string> noLoops = std::unordered_set<std::string>()) const
       {
@@ -213,7 +225,7 @@ public:
       {
          res = std::make_shared<Surge::UI::Skin::Control>();
          res->copyFromConnector(c);
-         resolveBaseParentOffsets( res );
+         // resolveBaseParentOffsets( res );
          controls.push_back(res);
       }
       return res;
@@ -248,7 +260,7 @@ public:
          }
          else
             return Maybe<std::string>();
-      } while( true );
+      } while( cl );
 
       return Maybe<std::string>();
    }
@@ -268,6 +280,8 @@ public:
    int getWindowSizeX() const { return szx; }
    int getWindowSizeY() const { return szy; }
 
+   bool hasFixedZooms() const { return zooms.size() != 0; }
+   std::vector<int> getFixedZooms() const { return zooms; }
    CScalableBitmap *backgroundBitmapForControl( Skin::Control::ptr_t c, std::shared_ptr<SurgeBitmaps> bitmapStore );
 
    typedef enum {
@@ -324,7 +338,7 @@ private:
    ControlGroup::ptr_t rootControl;
    std::vector<Control::ptr_t> controls;
    std::unordered_map<std::string, ComponentClass::ptr_t> componentClasses;
-
+   std::vector<int> zooms;
    bool recursiveGroupParse( ControlGroup::ptr_t parent, TiXmlElement *groupList, std::string pfx="" );
 };
 
@@ -334,6 +348,13 @@ public:
    static SkinDB& get();
 
    struct Entry {
+
+      enum RootType {
+         UNKNOWN,
+         FACTORY,
+         USER
+      } rootType = UNKNOWN;
+
       std::string root;
       std::string name;
       std::string displayName;

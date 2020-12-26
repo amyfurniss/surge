@@ -16,7 +16,7 @@ Fracture::Fracture(audioMasterCallback audioMaster) :
     AudioEffectX(audioMaster, kNumPrograms, kNumParameters)
 {
 	A = 0.25; //1 from 0 to 4: A*4
-	B = 0.5; //2 from 1 to 3: (B*2.999)+1
+	B = 0.0;
 	C = 1.0;
 	D = 1.0;
 	fpNShapeL = 0.0;
@@ -116,6 +116,29 @@ void Fracture::getParameterDisplay(VstInt32 index, char *text) {
         case kParamD: float2string (D, text, kVstMaxParamStrLen); break;
         default: break; // unknown parameter, shouldn't happen!
 	} //this displays the values and handles 'popups' where it's discrete choices
+}
+
+bool Fracture::parseParameterValueFromString(VstInt32 index, const char* str, float& f)
+{
+   auto v = std::atof( str );
+   switch( index )
+   {
+   case kParamA: f = v / 4.0; break;
+   case kParamC: f = pow( 10.0, ( v / 20.0 ) ); break;
+   case kParamD: f = v; break;
+   default: f = v;
+   }
+   return true;
+}
+
+bool Fracture::isParameterIntegral(VstInt32 index)
+{
+   return index==kParamB;
+}
+
+int Fracture::parameterIntegralUpperBound(VstInt32 index)
+{
+   return 3;
 }
 
 void Fracture::getParameterLabel(VstInt32 index, char *text) {

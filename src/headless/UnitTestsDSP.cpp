@@ -18,7 +18,7 @@ TEST_CASE( "Simple Single Oscillator is Constant", "[dsp]" )
 {
    auto surge = Surge::Headless::createSurge(44100);
    REQUIRE( surge );
-   // surge->storage.getPatch().scene[0].osc[0].type.val.i = ot_sinus;
+   // surge->storage.getPatch().scene[0].osc[0].type.val.i = ot_sine;
 
    int len = 4410 * 5;
    //int len = BLOCK_SIZE * 20;
@@ -458,6 +458,19 @@ TEST_CASE( "Check FastMath Functions", "[dsp]" )
          REQUIRE( U.a[0] == Approx( cn ).epsilon( 5e-4 ) );
       }
    }
+
+   SECTION( "fastTan" )
+   {
+      // need to bump start point slightly, fasttan is only valid just after -PI/2
+      for( float x=-M_PI/2.0 + 0.001; x < M_PI/2.0; x += 0.02 )
+      {
+         INFO( "Testing fasttan at " << x );
+         auto rn = tanf( x );
+         auto rd = Surge::DSP::fasttan( x );
+         REQUIRE( rd == Approx( rn ).epsilon( 1e-4 ) );
+      }
+   }
+
 
    SECTION( "fastexp and fastexpSSE" )
    {

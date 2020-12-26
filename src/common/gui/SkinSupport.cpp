@@ -10,7 +10,7 @@
 #include "UIInstrumentation.h"
 #include "CScalableBitmap.h"
 
-#include "ImportFilesystem.h"
+#include "filesystem/import.h"
 
 #include <array>
 #include <iostream>
@@ -21,6 +21,8 @@ namespace Surge
 namespace UI
 {
 
+
+const std::string NoneClassName = "none";
 const std::string Skin::defaultImageIDPrefix = "DEFAULT/";
 std::ostringstream SkinDB::errorStream;
    
@@ -43,8 +45,7 @@ SkinDB::~SkinDB()
 #ifdef INSTRUMENT_UI
    Surge::Debug::record( "SkinDB::~SkinDB" );
 #endif   
-   skins.clear(); // Not really necessary but means the skins are destroyed before the rest of the
-                  // dtor runs
+   skins.clear(); // Not really necessary but means the skins are destroyed before the rest of the dtor runs
    // std::cout << "Destroying SkinDB" << std::endl;
 }
 
@@ -56,9 +57,11 @@ std::shared_ptr<Skin> SkinDB::defaultSkin(SurgeStorage *storage)
       return getSkin(defaultSkinEntry);
    else
    {
+      auto st = (Entry::RootType)(Surge::Storage::getUserDefaultValue(storage, "defaultSkinRootType", Entry::UNKNOWN ));
+
       for( auto e : availableSkins )
       {
-         if( e.name == uds )
+         if( e.name == uds && ( e.rootType == st || st == Entry::UNKNOWN ))
             return getSkin(e);
       }
       return getSkin(defaultSkinEntry);
@@ -86,6 +89,10 @@ void SkinDB::rescanForSkins(SurgeStorage* storage)
 
    for (auto& source : paths)
    {
+      Entry::RootType rt = Entry::UNKNOWN;
+      if( path_to_string(source) == path_to_string(paths[0]) ) rt = Entry::FACTORY;
+      if( path_to_string(source) == path_to_string(paths[1]) ) rt = Entry::USER;
+
       std::vector<fs::path> alldirs;
       std::deque<fs::path> workStack;
       workStack.push_back(source);
@@ -129,9 +136,11 @@ void SkinDB::rescanForSkins(SurgeStorage* storage)
                auto path = name.substr(0, sp + 1);
                auto lo = name.substr(sp + 1);
                Entry e;
+               e.rootType = rt;
                e.root = path;
                e.name = lo + sep;
                if (e.name.find("default.surge-skin") != std::string::npos &&
+                   rt == Entry::FACTORY &&
                    defaultSkinEntry.name == "")
                {
                   defaultSkinEntry = e;
@@ -161,7 +170,7 @@ void SkinDB::rescanForSkins(SurgeStorage* storage)
       // Obviously fix this
       doc.SetTabSize(4);
       
-      if (!doc.LoadFile(x) || doc.Error())
+      if (!doc.LoadFile(string_to_path(x)))
       {
          e.displayName = e.name + " (parse error)";
          continue;
@@ -236,7 +245,7 @@ bool Skin::reloadSkin(std::shared_ptr<SurgeBitmaps> bitmapStore)
    // Obviously fix this
    doc.SetTabSize(4);
 
-   if (!doc.LoadFile(resourceName("skin.xml")) || doc.Error())
+   if (!doc.LoadFile(string_to_path(resourceName("skin.xml"))))
    {
       FIXMEERROR << "Unable to load skin.xml resource '" << resourceName("skin.xml") << "'"
                  << std::endl;
@@ -299,9 +308,19 @@ bool Skin::reloadSkin(std::shared_ptr<SurgeBitmaps> bitmapStore)
    }
 
    /*
+    * We have a reasonably valid skin so try and add fonts
+    */
+   auto fontPath = string_to_path( resourceName("fonts"));
+   if( fs::is_directory(fontPath ))
+   {
+      addFontSearchPathToSystem(fontPath);
+   }
+
+   /*
    ** Parse the globals section
    */
    globals.clear();
+   zooms.clear();
    for (auto gchild = globalsxml->FirstChild(); gchild; gchild = gchild->NextSibling())
    {
       auto lkid = TINYXML_SAFE_TO_ELEMENT(gchild);
@@ -476,8 +495,8 @@ bool Skin::reloadSkin(std::shared_ptr<SurgeBitmaps> bitmapStore)
                    )
                {
                   validKids = false;
-                  for( auto kk : k.second )
-                     std::cout << _D(kk.first) << _D(kk.second) << std::endl;
+                  //for( auto kk : k.second )
+                     //std::cout << _D(kk.first) << _D(kk.second) << std::endl;
                   FIXMEERROR << "Each subchild of a multi-image must ontain a zoom-level and resource";
                   break;
                }
@@ -509,6 +528,18 @@ bool Skin::reloadSkin(std::shared_ptr<SurgeBitmaps> bitmapStore)
             }
          }
       }
+      if( g.first == "zoom-levels" )
+      {
+         for( auto k : g.second.children )
+         {
+            if( k.second.find("zoom") != k.second.end() )
+            {
+               zooms.push_back( std::atoi( k.second["zoom"].c_str()));
+            }
+         }
+         // Store the zooms in sorted order
+         std::sort( zooms.begin(), zooms.end() );
+      }
       if (g.first == "color")
       {
          auto p = g.second.props;
@@ -517,26 +548,7 @@ bool Skin::reloadSkin(std::shared_ptr<SurgeBitmaps> bitmapStore)
          auto r = VSTGUI::CColor();
          if (val[0] == '#')
          {
-            uint32_t rgb;
-            sscanf(val.c_str() + 1, "%x", &rgb);
-
-            auto l = strlen( val.c_str() + 1 );
-            int a = 255;
-            if( l > 6 )
-            {
-               a = rgb % 256;
-               rgb = rgb >> 8;
-            }
-            
-            int b = rgb % 256;
-            rgb = rgb >> 8;
-
-            int g = rgb % 256;
-            rgb = rgb >> 8;
-
-            int r = rgb % 256;
-            
-            colors[id] = ColorStore( VSTGUI::CColor(r, g, b, a) );
+            colors[id] = ColorStore( colorFromHexString(val));
          }
          else if( val[0] == '$' )
          {
@@ -667,7 +679,11 @@ bool Skin::recursiveGroupParse( ControlGroup::ptr_t parent, TiXmlElement *contro
          }
          else
          {
-            auto uid = attrstr(lkid, "ui_identifier");
+            // allow using case insensitive UI identifiers
+            auto str = attrstr(lkid, "ui_identifier");
+            std::transform(str.begin(), str.end(), str.begin(), [](unsigned char c) { return std::tolower(c); });
+
+            auto uid = str;
             auto conn = Surge::Skin::Connector::connectorByID(uid);
             if( !conn.payload || conn.payload->defaultComponent == Surge::Skin::Connector::NONE )
             {
@@ -677,7 +693,7 @@ bool Skin::recursiveGroupParse( ControlGroup::ptr_t parent, TiXmlElement *contro
             {
                control->copyFromConnector(conn);
                control->type = Control::Type::UIID;
-               control->ui_id = attrstr(lkid, "ui_identifier");
+               control->ui_id = uid;
             }
          }
 
@@ -719,11 +735,66 @@ bool Skin::recursiveGroupParse( ControlGroup::ptr_t parent, TiXmlElement *contro
       }
    }
 
-   for( auto c : controls )
+   /*
+    * We now need to create all the base parent objects before we go
+    * and resolve them, since that resolutino can be recursive when
+    * looping over controls, and we don't want to actually modify controls
+    * while resolving.
+    */
+   std::set<std::string> baseParents;
+   for( auto &c : Surge::Skin::Connector::connectorsByComponentType(Surge::Skin::Connector::GROUP))
+      baseParents.insert( c.payload->id );
+   do {
+      for( auto &bp : baseParents )
+      {
+         getOrCreateControlForConnector(bp);
+      }
+      baseParents.clear();
+      for( auto c : controls )
+      {
+         if( c->allprops.find("base_parent") != c->allprops.end() )
+         {
+            auto bp = c->allprops["base_parent"];
+            auto pc = controlForUIID(bp);
+
+            if (!pc)
+            {
+               baseParents.insert(bp);
+            }
+         }
+      }
+   } while( ! baseParents.empty() );
+
+   controls.shrink_to_fit();
+   for( auto &c : controls )
    {
       resolveBaseParentOffsets(c);
    }
    return true;
+}
+
+VSTGUI::CColor Skin::colorFromHexString(const std::string& val) const
+{
+   uint32_t rgb;
+   sscanf(val.c_str() + 1, "%x", &rgb);
+
+   auto l = strlen( val.c_str() + 1 );
+   int a = 255;
+   if( l > 6 )
+   {
+      a = rgb % 256;
+      rgb = rgb >> 8;
+   }
+
+   int b = rgb % 256;
+   rgb = rgb >> 8;
+
+   int g = rgb % 256;
+   rgb = rgb >> 8;
+
+   int r = rgb % 256;
+
+   return VSTGUI::CColor(r, g, b, a);
 }
 
 bool Skin::hasColor(const std::string &iid) const
@@ -763,6 +834,11 @@ VSTGUI::CColor Skin::getColor(const std::string &iid, const VSTGUI::CColor& def,
       case ColorStore::UNRESOLVED_ALIAS: // This should never occur
          return VSTGUI::kRedCColor;
       }
+   }
+
+   if( id[0] == '#' )
+   {
+      return colorFromHexString(id);
    }
    return def;
 }
@@ -883,9 +959,9 @@ void Surge::UI::Skin::Control::copyFromConnector(const Surge::Skin::Connector& c
       transferPropertyIf(Surge::Skin::Connector::BACKGROUND, "bg_id" );
       transferPropertyIf(Surge::Skin::Connector::ROWS, "rows" );
       transferPropertyIf( Surge::Skin::Connector::COLUMNS, "columns" );
-      transferPropertyIf( Surge::Skin::Connector::SUBPIXMAPS, "subpixmaps" );
-      transferPropertyIf( Surge::Skin::Connector::IMGOFFSET, "imgoffset" );
-      transferPropertyIf( Surge::Skin::Connector::DRAGABLE_HSWITCH, "dragable" );
+      transferPropertyIf( Surge::Skin::Connector::FRAMES, "frames" );
+      transferPropertyIf( Surge::Skin::Connector::FRAME_OFFSET, "frame_offset" );
+      transferPropertyIf( Surge::Skin::Connector::DRAGGABLE_HSWITCH, "draggable" );
       break;
    }
    case Surge::Skin::Connector::SWITCH: {
@@ -943,8 +1019,7 @@ void Surge::UI::Skin::Control::copyFromConnector(const Surge::Skin::Connector& c
    default: {
       classname = "UNKNOWN";
       ultimateparentclassname = "UNKNOWN";
-      std::cout << "SOFTWARE ERROR " << __LINE__ << " " << __FILE__ << " '" << ui_id << "' "
-                << c.payload->defaultComponent << std::endl;
+      //std::cout << "SOFTWARE ERROR " << __LINE__ << " " << __FILE__ << " '" << ui_id << "' " << c.payload->defaultComponent << std::endl;
       break;
    }
    }
@@ -952,24 +1027,38 @@ void Surge::UI::Skin::Control::copyFromConnector(const Surge::Skin::Connector& c
 
 void Surge::UI::Skin::resolveBaseParentOffsets(Skin::Control::ptr_t c)
 {
+   if( c->parentResolved ) return;
+   // When we enter here, all the objects will ahve been created by the loop above
    if( c->allprops.find("base_parent") != c->allprops.end() )
    {
+      // std::cout << "Control Parent " << _D(c->x) << _D(c->y) << std::endl;
       auto bp = c->allprops["base_parent"];
-      auto pc = getOrCreateControlForConnector(Surge::Skin::Connector::connectorByID(bp));
+      auto pc = controlForUIID(bp);
       while( pc )
       {
+         /*
+          * A special case: If a group has control type 'none' then my control adopts it
+          * This is the case only for none.
+          */
+         if( pc->classname == NoneClassName )
+         {
+            c->classname = NoneClassName;
+            c->ultimateparentclassname = NoneClassName;
+         }
          c->x += pc->x;
          c->y += pc->y;
          if( pc->allprops.find( "base_parent" ) != pc->allprops.end() )
          {
-            pc = getOrCreateControlForConnector(Surge::Skin::Connector::connectorByID(pc->allprops["base_parent"]));
+            pc = controlForUIID(pc->allprops["base_parent"]);
          }
          else
          {
             pc = nullptr;
          }
       }
+      // std::cout << "Control POSTPar " << _D(c->x) << _D(c->y) << std::endl;
    }
+   c->parentResolved = true;
 }
 
 } // namespace UI

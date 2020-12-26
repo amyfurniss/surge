@@ -21,7 +21,6 @@
 #include "DebugHelpers.h"
 #include "guihelpers.h"
 #include "SkinColors.h"
-#include "MSEGEditor.h"
 #include <cstdint>
 
 using namespace VSTGUI;
@@ -61,17 +60,22 @@ void CLFOGui::draw(CDrawContext* dc)
    assert(storage);
    assert(ss);
 
+   if( forcedCursorToMSEGHand && lfodata->shape.val.i != lt_mseg )
+   {
+      getFrame()->setCursor(kCursorDefault);
+   }
+
    auto size = getViewSize();
    CRect outer(size);
    outer.inset(margin, margin);
    CRect leftpanel(outer);
    CRect maindisp(outer);
    leftpanel.right = lpsize + leftpanel.left;
-   maindisp.left = leftpanel.right + 4 + 15;
+   maindisp.left = leftpanel.right + 19;
    maindisp.top += 1;
    maindisp.bottom -= 1;
 
-   if (ss && lfodata->shape.val.i == ls_stepseq)
+   if (ss && lfodata->shape.val.i == lt_stepseq)
    {
       drawStepSeq(dc, maindisp, leftpanel);
    }
@@ -113,12 +117,27 @@ void CLFOGui::draw(CDrawContext* dc)
 
 
       float susTime = 0.5;
-      float totalEnvTime =  pow(2.0f,lfodata->delay.val.f) +
-          pow(2.0f,lfodata->attack.val.f) +
-          pow(2.0f,lfodata->hold.val.f) +
-          pow(2.0f,lfodata->decay.val.f) +
-          std::min(pow(2.0f,lfodata->release.val.f), 4.f) +
-          susTime;
+      bool msegRelease = false;
+      float msegReleaseAt = 0;
+      float lfoEnvelopeDAHDTime = pow(2.0f, lfodata->delay.val.f) +
+                                  pow(2.0f, lfodata->attack.val.f) +
+                                  pow(2.0f, lfodata->hold.val.f) + pow(2.0f, lfodata->decay.val.f);
+
+      if (lfodata->shape.val.i == lt_mseg)
+      {
+         // We want the sus time to get us through at least one loop
+         if (ms->loopMode == MSEGStorage::GATED_LOOP && ms->editMode == MSEGStorage::ENVELOPE &&
+             ms->loop_end >= 0)
+         {
+            float loopEndsAt = ms->segmentEnd[ms->loop_end];
+            susTime = std::max(0.5f, loopEndsAt - lfoEnvelopeDAHDTime);
+            msegReleaseAt = lfoEnvelopeDAHDTime + susTime;
+            msegRelease = true;
+         }
+      }
+
+      float totalEnvTime = lfoEnvelopeDAHDTime + std::min(pow(2.0f, lfodata->release.val.f), 4.f) +
+                           0.5; // susTime; this is now 0.5 to keep the envelope fixed in gate mode
 
       LfoModulationSource* tlfo = new LfoModulationSource();
       LfoModulationSource* tFullWave = nullptr;
@@ -168,11 +187,7 @@ void CLFOGui::draw(CDrawContext* dc)
       // OK so let's assume we want about 1000 pixels worth tops in
       int averagingWindow = (int)(totalSamples/1000.0) + 1;
 
-#if LINUX
-      float valScale = 10000.0;
-#else
       float valScale = 100.0;
-#endif
       int susCountdown = -1;
 
       float priorval = 0.f;
@@ -224,7 +239,8 @@ void CLFOGui::draw(CDrawContext* dc)
          {
              path->beginSubpath(xc, val );
              eupath->beginSubpath(xc, euval);
-             if( ! lfodata->unipolar.val.b )
+             if ((lfodata->unipolar.val.b == false) && (lfodata->shape.val.i != lt_envelope) &&
+                 (lfodata->shape.val.i != lt_function)) // TODO FIXME: When function LFO type is added, remove it from this condition!
                 edpath->beginSubpath(xc, edval);
              if( tFullWave ) deactPath->beginSubpath(xc, wval );
              priorval = val;
@@ -292,7 +308,7 @@ void CLFOGui::draw(CDrawContext* dc)
       tf.transform(top1);
       tf.transform(bot0);
       tf.transform(bot1);
-      dc->setDrawMode(VSTGUI::kAntiAliasing);
+      Surge::UI::NonIntegralAntiAliasGuard niaag(dc);
 
       dc->setLineWidth(1.0);
       // LFO bg center line
@@ -307,7 +323,7 @@ void CLFOGui::draw(CDrawContext* dc)
 
 
 #if LINUX
-      dc->setLineWidth(40.0);
+      dc->setLineWidth(0.7);
 #else
       dc->setLineWidth(1.0);
 #endif
@@ -358,7 +374,7 @@ void CLFOGui::draw(CDrawContext* dc)
       }
 
 #if LINUX
-      dc->setLineWidth(50.0);
+      dc->setLineWidth(0.7);
 #elif WINDOWS
       dc->setLineWidth(1.0);
 #else
@@ -372,7 +388,10 @@ void CLFOGui::draw(CDrawContext* dc)
       }
 
       // LFO waveform itself
+      CRect cr;
+      auto axesbox = CRect( top0.x, top0.y, bot1.x, bot1.y );
       dc->setFrameColor(skin->getColor(Colors::LFO::Waveform::Wave));
+      dc->setLineStyle(CLineStyle(VSTGUI::CLineStyle::kLineCapButt, VSTGUI::CLineStyle::kLineJoinBevel));
       dc->drawGraphicsPath(path, VSTGUI::CDrawContext::PathDrawMode::kPathStroked, &tfpath );
 
       // top ruler
@@ -447,9 +466,6 @@ void CLFOGui::draw(CDrawContext* dc)
          float xp = dx * l;
          float yp = valScale * 0.9;
          float typ = yp;
-#if LINUX
-         typ = valScale * 0.95;
-#endif
          CRect tp(CPoint(xp + 0.5, typ + 0.5), CPoint(10, 10));
          tf.transform(tp);
          dc->setFontColor(skin->getColor(Colors::LFO::Waveform::Ruler::Text));
@@ -471,6 +487,20 @@ void CLFOGui::draw(CDrawContext* dc)
          dc->drawLine(sp, ep);
       }
 
+      /*
+       * In 1.8 I think we don't want to show the key release point in the simulated wave
+       * with the MSEG but I wrote it to debug and we may change our mid so keeping this code
+       * here
+       */
+      if (msegRelease && false)
+      {
+         float xp = msegReleaseAt / drawnTime * valScale;
+         CPoint sp(xp, valScale * 0.9), ep(xp, valScale * 0.1);
+         tf.transform(sp);
+         tf.transform(ep);
+         dc->setFrameColor(kRedCColor);
+         dc->drawLine(sp, ep);
+      }
       dc->restoreGlobalState();
       path->forget();
       deactPath->forget();
@@ -478,22 +508,6 @@ void CLFOGui::draw(CDrawContext* dc)
       edpath->forget();
    }
 
-   if( lfodata->shape.val.i == ls_mseg )
-   {
-      auto size = getViewSize();
-      
-      auto shiftTranslate = CGraphicsTransform().translate( size.left, size.top ).translate( splitpoint, 0 );
-      CDrawContext::Transform shiftTranslatetransform( *dc, shiftTranslate );
-      
-      dc->setFillColor( kRedCColor );
-      // FIXME 30x10 here and in onmousedown
-      dc->drawRect( CRect( 0, 0, 30, 10 ), kDrawFilled );
-      dc->setFontColor( kWhiteCColor );
-      dc->setFont( displayFont );
-      dc->drawString( "Edit", CRect( 0, 0, 30, 10 ) );
-
-   }
-      
    CColor cshadow = {0x5d, 0x5d, 0x5d, 0xff};
    CColor cselected = skin->getColor(Colors::LFO::Type::SelectedBackground);
 
@@ -503,7 +517,7 @@ void CLFOGui::draw(CDrawContext* dc)
    rect_shapes = leftpanel;
    if( ! typeImg )
    {
-      typeImg = bitmapStore->getBitmap( IDB_LFOTYPE );
+      typeImg = bitmapStore->getBitmap( IDB_LFO_TYPE );
       typeImgHover = skin->hoverBitmapOverlayForBackgroundBitmap(skinControl, typeImg, bitmapStore, Surge::UI::Skin::HOVER );
       typeImgHoverOn = skin->hoverBitmapOverlayForBackgroundBitmap(skinControl, typeImg, bitmapStore, Surge::UI::Skin::HOVER_OVER_ON );
    }
@@ -514,7 +528,7 @@ void CLFOGui::draw(CDrawContext* dc)
       auto off = lfodata->shape.val.i * 76;
       typeImg->draw( dc, CRect( CPoint( leftpanel.left, leftpanel.top + 2), CPoint( 51, 76 ) ), CPoint( 0, off ), 0xff );
 
-      for( int i=0; i<n_lfoshapes; ++i )
+      for( int i=0; i<n_lfo_types; ++i )
       {
          int xp = ( i % 2 ) * 25 + leftpanel.left;
          int yp = ( i / 2 ) * 15 + leftpanel.top;
@@ -539,7 +553,7 @@ void CLFOGui::draw(CDrawContext* dc)
    }
    else
    {
-      for (int i = 0; i < n_lfoshapes; i++)
+      for (int i = 0; i < n_lfo_types; i++)
       {
          CRect tb(leftpanel);
          tb.top = leftpanel.top + 10 * i;
@@ -566,7 +580,7 @@ void CLFOGui::draw(CDrawContext* dc)
          shaperect[i] = tb;
          // tb.offset(0,-1);
          tb.top += 1.6; // now the font is smaller and the box is square, smidge down the text
-         dc->drawString(ls_names[i], tb);
+         dc->drawString(lt_names[i], tb);
       }
    }
 
@@ -586,7 +600,7 @@ enum
 
 void CLFOGui::drawStepSeq(VSTGUI::CDrawContext *dc, VSTGUI::CRect &maindisp, VSTGUI::CRect &leftpanel)
 {
-   dc->setDrawMode(VSTGUI::kAntiAliasing);
+   Surge::UI::NonIntegralAntiAliasGuard naag(dc);
 
    auto size = getViewSize();
 
@@ -836,12 +850,25 @@ void CLFOGui::drawStepSeq(VSTGUI::CDrawContext *dc, VSTGUI::CRect &maindisp, VST
 
    tp[lfodata->magnitude.param_id_in_scene].i = lfodata->magnitude.val.i;
 
-   // Min out the rate
+   // Min out the rate. Be careful with temposync.
+   float floorrate = -1.2; // can't be const - we mod it
    float displayRate = lfodata->rate.val.f;
-   if( lfodata->rate.val.f < -3.5 )
+   const float twotofloor = powf( 2.0, -1.2 ); // so copy value here
+   if( lfodata->rate.temposync )
    {
-      tp[lfodata->rate.param_id_in_scene].f = - 3.5;
-      displayRate = -3.5;
+      /*
+       * So frequency = temposyncration * 2^rate
+       * We want floor of frequency to be 2^-3.5 (that's the check below)
+       * So 2^rate = temposyncratioinb 2^-3.5;
+       * rate = log2( 2^-3.5 * tsratioinb )
+       */
+      floorrate = std::max( floorrate, log2( twotofloor * storage->temposyncratio_inv ) );
+   }
+
+   if( lfodata->rate.val.f < floorrate )
+   {
+      tp[lfodata->rate.param_id_in_scene].f = floorrate;
+      displayRate = floorrate;
    }
    else
    {
@@ -1104,119 +1131,210 @@ void CLFOGui::drawStepSeq(VSTGUI::CDrawContext *dc, VSTGUI::CRect &maindisp, VST
 }
 
 
-CMouseEventResult CLFOGui::onMouseDown(CPoint& where, const CButtonState& buttons)
+void CLFOGui::openPopup(CPoint &where)
 {
-   if (1) //(buttons & kLButton))
+   CPoint w = where;
+
+   printf("%.2f %.2f\n", w.x, w.y);
+
+   COptionMenu* contextMenu = new COptionMenu(CRect(w, CPoint(0, 0)), 0, 0, 0, 0,
+                                              VSTGUI::COptionMenu::kNoDrawStyle | VSTGUI::COptionMenu::kMultipleCheckStyle);
+
+   auto addCb = [] (COptionMenu *p, const std::string &l, std::function<void()> op ) -> CCommandMenuItem *
+                   {
+                      auto m = new CCommandMenuItem( CCommandMenuItem::Desc( l.c_str() ) );
+                      m->setActions([op](CCommandMenuItem* m) { op(); });
+                      p->addEntry( m );
+                      return m;
+                   };
+
+   contextMenu->addEntry("[?] MSEG Editor");
+
+   contextMenu->addSeparator();
+
+
+   auto sge = dynamic_cast<SurgeGUIEditor*>(listener);
+   std::string openname = (sge->editorOverlayTag != "msegEditor") ? "Open MSEG Editor" : "Close MSEG Editor";
+   addCb(contextMenu, Surge::UI::toOSCaseForMenu(openname), [this, sge]()
+                                 {
+                                    if (sge)
+                                       sge->toggleMSEGEditor();
+                                 });
+
+   contextMenu->addSeparator();
+
+   auto lpoff = addCb(contextMenu, Surge::UI::toOSCaseForMenu("No Looping"), [this, sge]()
+                                   {
+                                      ms->loopMode = MSEGStorage::LoopMode::ONESHOT;
+                                      if (sge->editorOverlayTag == "msegEditor")
+                                      {
+                                         sge->closeMSEGEditor();
+                                         sge->showMSEGEditor();
+                                      }
+                                      invalid();
+                                   });
+   lpoff->setChecked(ms->loopMode == MSEGStorage::LoopMode::ONESHOT);
+
+   auto lpon = addCb(contextMenu, Surge::UI::toOSCaseForMenu("Loop Always"), [this, sge]()
+                                   {
+                                      ms->loopMode = MSEGStorage::LoopMode::LOOP;
+                                      if (sge->editorOverlayTag == "msegEditor")
+                                      {
+                                         sge->closeMSEGEditor();
+                                         sge->showMSEGEditor();
+                                      }
+                                      invalid();
+                                   });
+   lpon->setChecked(ms->loopMode == MSEGStorage::LoopMode::LOOP);
+
+   auto lpgate = addCb(contextMenu, Surge::UI::toOSCaseForMenu("Loop Until Release"), [this, sge]()
+                                   {
+                                      ms->loopMode = MSEGStorage::LoopMode::GATED_LOOP;
+                                      if (sge->editorOverlayTag == "msegEditor")
+                                      {
+                                         sge->closeMSEGEditor();
+                                         sge->showMSEGEditor();
+                                      }
+                                      invalid();
+                                   });
+   lpgate->setChecked(ms->loopMode == MSEGStorage::LoopMode::GATED_LOOP);
+
+   getFrame()->addView(contextMenu);
+   contextMenu->popup();
+}
+
+CMouseEventResult CLFOGui::onMouseDown(CPoint &where, const CButtonState &buttons)
+{
+   // fake a pass-through of extra mouse buttons (middle, prev/next buttons) to arm modulation
+   if (listener && (buttons & (kMButton | kButton4 | kButton5)))
    {
-      if( lfodata->shape.val.i == ls_mseg )
-      {
-         auto size = getViewSize();
+      listener->controlModifierClicked(this, buttons);
+      return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+   }
 
-         int wx = where.x - size.left - splitpoint;
-         int wy = where.y - size.top;
-         if( wx > 0 && wx < 30 && wy > 0 && wy < 10 )
-         {
-            auto sge = dynamic_cast<SurgeGUIEditor *>(listener);
-            if( sge )
-            {
-               // FIXME - press this button twice and you end up hosed
-               auto mse = new MSEGEditor(lfodata, ms, skin, associatedBitmapStore);
-               auto vs = mse->getViewSize().getWidth();
-               float xp = (skin->getWindowSizeX() - (vs + 8)) * 0.5;
-               sge->setEditorOverlay( mse, "MSEG Editor", CPoint( xp, 57 ), false, []() { std::cout << "MSE Closed" << std::endl; } );
-               return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
-            }
-         }
-      }
-         
-      if (ss && lfodata->shape.val.i == ls_stepseq)
+   if (lfodata->shape.val.i == lt_mseg)
+   {
+      // only the LFO waveform area
+      auto displayrect = getViewSize();
+      displayrect.left += lpsize + 19;
+  
+      // open MSEG editor when clicking on waveform
+      if (buttons & kLButton)
       {
-         if (rect_steps.pointInside(where))
-         {
-            detachCursor(where);
-            if( buttons.isRightButton() )
-            {
-               rmStepStart = where;
-               controlstate = cs_linedrag;
-            }
-            else
-            {
-               controlstate = cs_steps;
-            }
-            onMouseMoved(where, buttons);
-            return kMouseEventHandled;
-         }
-         else if (rect_steps_retrig.pointInside(where))
-         {
-            controlstate = cs_trigtray_toggle;
+         auto sge = dynamic_cast<SurgeGUIEditor *>(listener);
 
-            for (int i = 0; i < n_stepseqsteps; i++)
-            {
-               draggedIntoTrigTray[i] = false;
-               if ((where.x > gaterect[i].left) && (where.x < gaterect[i].right))
-               {
-                  selectedSSrow = i;
-                  mouseDownTrigTray = i;
-                  trigTrayButtonState = buttons;
-                  draggedIntoTrigTray[i] = true;
-               }
-            }
-            invalid();
-            return kMouseEventHandled;
-         }
-         else if (ss_shift_left.pointInside(where))
-         {
-            float t = ss->steps[0];
-            for (int i = 0; i < (n_stepseqsteps - 1); i++)
-            {
-               ss->steps[i] = ss->steps[i + 1];
-               assert((i >= 0) && (i < n_stepseqsteps));
-            }
-            ss->steps[n_stepseqsteps - 1] = t;
-            ss->trigmask = ( ((ss->trigmask & 0x000000000000fffe) >> 1) | (((ss->trigmask & 1) << 15) & 0xffff)) |
-               ( ((ss->trigmask & 0x00000000fffe0000) >> 1) | (((ss->trigmask & 0x10000) << 15) & 0xffff0000 )) |
-               ( ((ss->trigmask & 0x0000fffe00000000) >> 1) | (((ss->trigmask & 0x100000000) << 15) & 0xffff00000000 ));
+         if (sge && displayrect.pointInside(where))
+            sge->toggleMSEGEditor();
+      }
 
-            invalid();
-            return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
-         }
-         else if (ss_shift_right.pointInside(where))
-         {
-            float t = ss->steps[n_stepseqsteps - 1];
-            for (int i = (n_stepseqsteps - 2); i >= 0; i--)
-            {
-               ss->steps[i + 1] = ss->steps[i];
-               assert((i >= 0) && (i < n_stepseqsteps));
-            }
-            ss->steps[0] = t;
-            ss->trigmask = ( ((ss->trigmask & 0x0000000000007fff) << 1) | (((ss->trigmask & 0x0000000000008000) >> 15) & 0xffff )) |
-               ( ((ss->trigmask & 0x000000007fff0000) << 1) | (((ss->trigmask & 0x0000000080000000) >> 15) & 0xffff0000 ))|
-               ( ((ss->trigmask & 0x00007fff00000000) << 1) | (((ss->trigmask & 0x0000800000000000) >> 15) & 0xffff00000000 ));
-            invalid();
-            return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
-         }
-      }
-      if (rect_ls.pointInside(where))
+      // open context menu with various MSEG related options
+      if ((buttons & kRButton) && displayrect.pointInside(where))
       {
-         controlstate = cs_loopstart;
-         return kMouseEventHandled;
-      }
-      else if (rect_le.pointInside(where))
-      {
-         controlstate = cs_loopend;
-         return kMouseEventHandled;
-      }
-      else if (rect_shapes.pointInside(where))
-      {
-         controlstate = cs_shape;
-         onMouseMoved(where, buttons);
-         return kMouseEventHandled;
+         openPopup(where);
+         return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
       }
    }
+
+   // handle step sequencer mouse events
+   if (ss && lfodata->shape.val.i == lt_stepseq)
+   {
+       if (rect_steps.pointInside(where))
+       {
+       if (storage)
+           this->hideCursor = !Surge::Storage::getUserDefaultValue(storage, "showCursorWhileEditing", 0);
+
+       if( buttons.isRightButton() )
+       {
+           rmStepStart = where;
+           controlstate = cs_linedrag;
+       }
+       else
+       {
+           controlstate = cs_steps;
+       }
+       onMouseMoved(where, buttons);
+       enqueueCursorHide = true;
+       return kMouseEventHandled;
+       }
+       else if (rect_steps_retrig.pointInside(where))
+       {
+       controlstate = cs_trigtray_toggle;
+
+       for (int i = 0; i < n_stepseqsteps; i++)
+       {
+           draggedIntoTrigTray[i] = false;
+           if ((where.x > gaterect[i].left) && (where.x < gaterect[i].right))
+           {
+               selectedSSrow = i;
+               mouseDownTrigTray = i;
+               trigTrayButtonState = buttons;
+               draggedIntoTrigTray[i] = true;
+           }
+       }
+       invalid();
+       return kMouseEventHandled;
+       }
+       else if (ss_shift_left.pointInside(where))
+       {
+       float t = ss->steps[0];
+       for (int i = 0; i < (n_stepseqsteps - 1); i++)
+       {
+           ss->steps[i] = ss->steps[i + 1];
+           assert((i >= 0) && (i < n_stepseqsteps));
+       }
+       ss->steps[n_stepseqsteps - 1] = t;
+       ss->trigmask = ( ((ss->trigmask & 0x000000000000fffe) >> 1) | (((ss->trigmask & 1) << 15) & 0xffff)) |
+           ( ((ss->trigmask & 0x00000000fffe0000) >> 1) | (((ss->trigmask & 0x10000) << 15) & 0xffff0000 )) |
+           ( ((ss->trigmask & 0x0000fffe00000000) >> 1) | (((ss->trigmask & 0x100000000) << 15) & 0xffff00000000 ));
+
+       invalid();
+       return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+       }
+       else if (ss_shift_right.pointInside(where))
+       {
+       float t = ss->steps[n_stepseqsteps - 1];
+       for (int i = (n_stepseqsteps - 2); i >= 0; i--)
+       {
+           ss->steps[i + 1] = ss->steps[i];
+           assert((i >= 0) && (i < n_stepseqsteps));
+       }
+       ss->steps[0] = t;
+       ss->trigmask = ( ((ss->trigmask & 0x0000000000007fff) << 1) | (((ss->trigmask & 0x0000000000008000) >> 15) & 0xffff )) |
+           ( ((ss->trigmask & 0x000000007fff0000) << 1) | (((ss->trigmask & 0x0000000080000000) >> 15) & 0xffff0000 ))|
+           ( ((ss->trigmask & 0x00007fff00000000) << 1) | (((ss->trigmask & 0x0000800000000000) >> 15) & 0xffff00000000 ));
+       invalid();
+       return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+       }
+   }
+
+   if (rect_ls.pointInside(where))
+   {
+       controlstate = cs_loopstart;
+       return kMouseEventHandled;
+   }
+   else if (rect_le.pointInside(where))
+   {
+       controlstate = cs_loopend;
+       return kMouseEventHandled;
+   }
+   else if (rect_shapes.pointInside(where))
+   {
+      if( buttons & kDoubleClick && lfodata->shape.val.i == lt_mseg )
+      {
+         auto sge = dynamic_cast<SurgeGUIEditor*>(listener);
+         if( sge )
+            sge->toggleMSEGEditor();
+      }
+      controlstate = cs_shape;
+      onMouseMoved(where, buttons);
+      return kMouseEventHandled;
+   }
+
    return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
 }
 CMouseEventResult CLFOGui::onMouseUp(CPoint& where, const CButtonState& buttons)
 {
+   enqueueCursorHide = false;
    lfo_type_hover = -1;
    if (controlstate == cs_trigtray_toggle)
    {
@@ -1267,7 +1385,7 @@ CMouseEventResult CLFOGui::onMouseUp(CPoint& where, const CButtonState& buttons)
 
    if( controlstate == cs_linedrag )
    {
-      attachCursor();
+      endCursorHide(rmStepCurr);
       int startStep = -1;
       int endStep = -1;
 
@@ -1347,24 +1465,56 @@ CMouseEventResult CLFOGui::onMouseUp(CPoint& where, const CButtonState& buttons)
 
    if( controlstate == cs_steps )
    {
-      attachCursor();
+      endCursorHide(barDragTop);
    }
    
    if (controlstate)
    {
       // onMouseMoved(where,buttons);
       controlstate = cs_null;
-      if( lfodata->shape.val.i == ls_stepseq )
+      if( lfodata->shape.val.i == lt_stepseq )
          invalid();
    }
    return kMouseEventHandled;
 }
 
+CMouseEventResult CLFOGui::onMouseExited(VSTGUI::CPoint& where, const VSTGUI::CButtonState& buttons)
+{
+   if (lfodata->shape.val.i == lt_mseg)
+      getFrame()->setCursor(VSTGUI::kCursorDefault);
+
+   ss_shift_hover = 0;
+   lfo_type_hover = -1;
+   invalid();
+
+   return VSTGUI::kMouseEventHandled;
+}
+
 CMouseEventResult CLFOGui::onMouseMoved(CPoint& where, const CButtonState& buttons)
 {
+   forcedCursorToMSEGHand = false;
+   if (lfodata->shape.val.i == lt_mseg)
+   {
+      auto displayrect = getViewSize();
+      displayrect.left += lpsize + 19;
+
+      if (displayrect.pointInside(where))
+      {
+         forcedCursorToMSEGHand = true;
+         getFrame()->setCursor(VSTGUI::kCursorHand);
+      } else {
+         getFrame()->setCursor(VSTGUI::kCursorDefault);
+      }
+   }
+
+   if( enqueueCursorHide )
+   {
+      startCursorHide(where);
+      enqueueCursorHide = false;
+   }
    int plt = lfo_type_hover;
    lfo_type_hover = -1;
-   for( int i=0; i<n_lfoshapes; ++i )
+   for( int i=0; i<n_lfo_types; ++i )
    {
       if( shaperect[i].pointInside(where) )
          lfo_type_hover = i;
@@ -1380,7 +1530,7 @@ CMouseEventResult CLFOGui::onMouseMoved(CPoint& where, const CButtonState& butto
    {
       // getFrame()->setCursor( VSTGUI::kCursorHand );
    }
-   else if (ss && lfodata->shape.val.i == ls_stepseq && (
+   else if (ss && lfodata->shape.val.i == lt_stepseq && (
                ss_shift_left.pointInside(where) ||
                ss_shift_right.pointInside(where)
                ))
@@ -1398,8 +1548,9 @@ CMouseEventResult CLFOGui::onMouseMoved(CPoint& where, const CButtonState& butto
 
    if (controlstate == cs_shape)
    {
-      for (int i = 0; i < n_lfoshapes; i++)
+      for (int i = 0; i < n_lfo_types; i++)
       {
+         auto prior = lfodata->shape.val.i;
          if (shaperect[i].pointInside(where))
          {
             if (lfodata->shape.val.i != i)
@@ -1414,6 +1565,9 @@ CMouseEventResult CLFOGui::onMouseMoved(CPoint& where, const CButtonState& butto
                   sge->refresh_mod();
                   sge->forceautomationchangefor(&(lfodata->shape));
                }
+
+               // this is less of a hack.
+               sge->lfoShapeChanged( prior, i );
 
             }
          }
@@ -1446,6 +1600,7 @@ CMouseEventResult CLFOGui::onMouseMoved(CPoint& where, const CButtonState& butto
          if ((where.x > steprect[i].left) && (where.x < steprect[i].right))
          {
             draggedStep = i;
+            barDragTop = where;
 
             float f = (float)(steprect[i].bottom - where.y) / steprect[i].getHeight();
 
@@ -1593,7 +1748,7 @@ void CLFOGui::invalidateIfAnythingIsTemposynced()
 
 bool CLFOGui::onWheel( const VSTGUI::CPoint &where, const float &distance, const CButtonState &buttons )
 {
-   if (ss && lfodata->shape.val.i == ls_stepseq && rect_steps.pointInside(where) ) {
+   if (ss && lfodata->shape.val.i == lt_stepseq && rect_steps.pointInside(where) ) {
       for (int i = 0; i < n_stepseqsteps; i++)
       {
          if ((where.x > steprect[i].left) && (where.x < steprect[i].right))
@@ -1621,8 +1776,8 @@ bool CLFOGui::onWheel( const VSTGUI::CPoint &where, const float &distance, const
                     auto ns = ps + d;
                     if( ns < 0 )
                        ns = 0;
-                    if( ns >= n_lfoshapes )
-                       ns = n_lfoshapes - 1;
+                    if( ns >= n_lfo_types )
+                       ns = n_lfo_types - 1;
 
                     if( ns != this->lfodata->shape.val.i )
                     {

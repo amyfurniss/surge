@@ -1,10 +1,13 @@
 #include "CSurgeVuMeter.h"
 #include "DspUtilities.h"
 #include "SkinColors.h"
+#include "SkinSupport.h"
+#include "CScalableBitmap.h"
+#include "SurgeBitmaps.h"
 
 using namespace VSTGUI;
 
-CSurgeVuMeter::CSurgeVuMeter(const CRect& size) : CControl(size, 0, 0, 0)
+CSurgeVuMeter::CSurgeVuMeter(const CRect& size, VSTGUI::IControlListener *listener) : CControl(size, listener, 0, 0)
 {
    stereo = true;
    valueR = 0.0;
@@ -15,6 +18,16 @@ float scale(float x)
 {
    x = limit_range(0.5f * x, 0.f, 1.f);
    return powf(x, 0.3333333333f);
+}
+
+CMouseEventResult CSurgeVuMeter::onMouseDown(CPoint& where, const CButtonState& button)
+{
+   if (listener && (button & (kMButton | kButton4 | kButton5)))
+   {
+      listener->controlModifierClicked(this, button);
+      return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+   }
+   return CControl::onMouseDown(where, button);
 }
 
 void CSurgeVuMeter::setType(int vutype)
@@ -37,8 +50,6 @@ void CSurgeVuMeter::setType(int vutype)
    }
 }
 
-// void setSecondaryValue(float v);
-
 void CSurgeVuMeter::setValueR(float f)
 {
    if (f != valueR)
@@ -50,96 +61,96 @@ void CSurgeVuMeter::setValueR(float f)
 
 void CSurgeVuMeter::draw(CDrawContext* dc)
 {
-   CColor vugreen = skin->getColor(Colors::VuMeter::Level);
-   auto vured = skin->getColor(Colors::VuMeter::HighLevel);
-   CRect size = getViewSize();
-   CRect lbox(size);
+   if (hVuBars == nullptr)
+   {
+      hVuBars = associatedBitmapStore->getBitmap(IDB_VUMETER_BARS);
+   }
+
+   auto bgCol = skin->getColor(Colors::VuMeter::Background);
+
+   CRect componentSize = getViewSize();
 
    VSTGUI::CDrawMode origMode = dc->getDrawMode();
-   VSTGUI::CDrawMode newMode(VSTGUI::kAntiAliasing);
+   VSTGUI::CDrawMode newMode(VSTGUI::kAntiAliasing | VSTGUI::kNonIntegralMode );
    dc->setDrawMode(newMode);
 
-   dc->setFillColor(skin->getColor(Colors::VuMeter::Background));
-   dc->drawRect(size, VSTGUI::kDrawFilled);
+   dc->setFillColor(skin->getColor(Colors::VuMeter::Border));
+   dc->drawRect(componentSize, VSTGUI::kDrawFilled);
 
-   CRect rectBox = lbox;
-   rectBox.inset(1, 1);
-   VSTGUI::CGraphicsPath* path = dc->createRoundRectGraphicsPath(rectBox, 2);
+   CRect borderRoundedRectBox = componentSize;
+   borderRoundedRectBox.inset(1, 1);
+   VSTGUI::CGraphicsPath* borderRoundedRectPath = dc->createRoundRectGraphicsPath(borderRoundedRectBox, 1);
 
-   auto border = skin->getColor(Colors::VuMeter::Border);
-   dc->setFillColor(border);
-   dc->drawGraphicsPath(path, VSTGUI::CDrawContext::kPathFilled);
+   dc->setFillColor(bgCol);
+   dc->drawGraphicsPath(borderRoundedRectPath, VSTGUI::CDrawContext::kPathFilled);
 
-   CRect bar(lbox);
-   bar.inset(2, 2);
-   if (stereo)
-      bar.bottom -= 3;
-   CRect barblack(bar);
+   /*
+    * Strategy is draw the entire bar then occlude it appropriately
+    */
+   if (hVuBars)
+   {
+      int off = stereo ? 1 : 0;
+      if (type == vut_gain_reduction)
+      {
+         off = 2;
+      }
 
-   float w = bar.getWidth();
+      hVuBars->draw(dc, componentSize, CPoint(0, off * 13), 0xFF);
+   }
+
+   CRect vuBarRegion(componentSize);
+   float w = vuBarRegion.getWidth();
+
+   /*
+    * Where does this constant come from?
+    * Well in 'scale' we map x -> x^3 to compress the range
+    * cuberoot(2) = 1.26 and change
+    * 1 / cuberoot(2) = 0.7937
+    * so this scales it so the zerodb point is 1/cuberoot(2) along
+    * still not entirely sure why, but there you go
+    */
    int zerodb = (0.7937f * w);
-
-   dc->drawPoint(CPoint(bar.left + zerodb, size.top), border);
-   dc->drawPoint(CPoint(bar.left + zerodb, size.bottom - 1), border);
 
    if (type == vut_gain_reduction)
    {
-      CRect bb2(bar);
-      bar.left++;
-      bar.top++;
-      bar.right = bar.left + zerodb + 1;
-      bar.left = bar.left + (scale(value) * w) - 1;
-      barblack.right = bar.left + 1;
-      barblack.left--;
-      bb2.left = bar.right - 1;
-      bb2.right++;
-      dc->setFillColor(border);
-      dc->drawRect(barblack, kDrawFilled);
-      dc->drawRect(bb2, kDrawFilled);
-      dc->setFillColor(vured);
-      dc->drawRect(bar, kDrawFilled);
+      float occludeTo = (scale(value) * (w - 1)) - zerodb; // Strictly negative
+      auto dr = componentSize;
+      dr = dr.inset(1, 1);
+      dr.right = dr.right + occludeTo;
+      dc->setFillColor(bgCol);
+      dc->drawRect(dr, kDrawFilled);
    }
    else
    {
-      bar.left++;
-      bar.top++;
-      bar.right = bar.left + (scale(value) * w);
-      dc->setFillColor(vugreen);
-      if (value > 1.0f)
-         dc->setFillColor(vured);
-      dc->drawRect(bar, kDrawFilled);
+      float occludeTo = (scale(value) * (w - 1)) - zerodb; // Strictly negative
+      auto drL = componentSize;
+      drL = drL.inset(1, 1);
 
-      barblack.left = bar.right - 1;
-      barblack.right++;
+      auto drR = componentSize;
+      drR = drR.inset(1, 1);
 
+      auto occludeFromL = scale(value) * w;
+      auto occludeFromR = scale(valueR) * w;
       if (stereo)
       {
-         CRect midline(lbox);
-         midline.inset(0, 4);
-         midline.left+=2;
-         midline.right-=2;
-         midline.top+=2;
-         midline.bottom --;
-         // midline.bottom = midline.top+2;
-         bar.offset(0, 3);
-         barblack.offset(0, 3);
-         bar.right = bar.left + (scale(valueR) * w);
-         dc->setFillColor(vugreen);
-         if (valueR > 1.0f)
-            dc->setFillColor(vured);
-         dc->drawRect(bar, kDrawFilled);
-
-         barblack.left = bar.right - 1;
-         dc->setFillColor(border);
-         dc->drawRect(midline, kDrawFilled);
+         drL.bottom = drL.top + 6;
+         drR.top = drL.bottom - 1;
+      }
+      drL.left += occludeFromL;
+      drR.left += occludeFromR;
+      dc->setFillColor(bgCol);
+      dc->drawRect(drL, kDrawFilled);
+      if( stereo )
+      {
+         dc->drawRect(drR, kDrawFilled);
       }
    }
 
-   dc->setFrameColor(skin->getColor(Colors::VuMeter::Background)); // the dark gray from original vector skin
+   dc->setFrameColor(skin->getColor(Colors::VuMeter::Background));
    dc->setLineWidth(1);
-   dc->drawGraphicsPath(path, VSTGUI::CDrawContext::kPathStroked);
+   dc->drawGraphicsPath(borderRoundedRectPath, VSTGUI::CDrawContext::kPathStroked);
 
-   path->forget();
+   borderRoundedRectPath->forget();
    dc->setDrawMode(origMode);
 
    setDirty(false);

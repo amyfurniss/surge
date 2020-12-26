@@ -7,7 +7,7 @@
 
 using namespace VSTGUI;
 
-// positions of FX slots   A IFX1   A IFX2     B IFX1    B IFX2    Send 1    Send 2   Master 1  Master 2
+// positions of FX slots   A IFX1   A IFX2     B IFX1    B IFX2    Send 1    Send 2   Global 1  Global 2
 const int blocks[8][2] = {{18, 1},  {44, 1},  {18, 41}, {44, 41}, {18, 21}, {44, 21}, {89, 11}, {89, 31}};
 
 // since graphics asset for FX icons (bmp00136) has frames ordered according to fxt enum
@@ -25,8 +25,8 @@ CEffectSettings::CEffectSettings(const CRect& size,
     : CControl(size, listener, tag, 0)
 {
    this->current = current;
-   bg = bitmapStore->getBitmap(IDB_FXCONF);
-   labels = bitmapStore->getBitmap(IDB_FXCONF_SYMBOLS);
+   bg = bitmapStore->getBitmap(IDB_FX_GRID);
+   labels = bitmapStore->getBitmap(IDB_FX_TYPE_ICONS);
    disabled = 0;
 }
 
@@ -43,7 +43,7 @@ void CEffectSettings::draw(CDrawContext* dc)
    }
    if (labels)
    {
-      for (int i = 0; i < 8; i++)
+      for (int i = 0; i < n_fx_slots; i++)
       {
          CRect r(0, 0, 17, 9);
          r.offset(size.left, size.top);
@@ -73,10 +73,23 @@ void CEffectSettings::draw(CDrawContext* dc)
 
    if( mouseActionMode == drag )
    {
+      auto vs = getViewSize();
+      vs = vs.inset(1,1);
       auto r = CRect( dragCurrent - dragCornerOff, CPoint( 17, 9 ) );
+      // r = vs.bound(r); this just pushes it inside; we need to keep constant size so
+      float dx = 0, dy=0;
+      if( r.top < vs.top ) { dy = vs.top - r.top; }
+      if( r.bottom > vs.bottom ) { dy = vs.bottom - r.bottom; }
+      if( r.left < vs.left ) { dx = vs.left - r.left; }
+      if( r.right > vs.right ) { dx = vs.right - r.right; }
+      r.top += dy;
+      r.bottom += dy;
+      r.right += dx;
+      r.left += dx;
+
       auto q = r;
       q = q.extend(1,1);
-      dc->setFillColor(skin->getColor( Colors::Effect::SelectorPanel::LabelBorder));
+      dc->setFillColor(skin->getColor( Colors::Effect::Grid::Border));
       dc->drawRect( q, kDrawFilled );
       labels->draw( dc, r, CPoint( 17, 9 * get_fxtype(type[dragSource])), 0xff );
    }
@@ -85,9 +98,15 @@ void CEffectSettings::draw(CDrawContext* dc)
 
 CMouseEventResult CEffectSettings::onMouseDown(CPoint& where, const CButtonState& buttons)
 {
+   if (listener && (buttons & (kMButton | kButton4 | kButton5)))
+   {
+      listener->controlModifierClicked(this, buttons);
+      return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+   }
+
    mouseActionMode = click;
    dragStart = where;
-   for (int i = 0; i < 8; i++)
+   for (int i = 0; i < n_fx_slots; i++)
    {
       CRect size = getViewSize();
       CRect r(0, 0, 17, 9);
@@ -107,7 +126,7 @@ CMouseEventResult CEffectSettings::onMouseUp(CPoint& where, const CButtonState& 
    if( mouseActionMode == drag )
    {
       int droppedOn = -1;
-      for (int i = 0; i < 8; i++)
+      for (int i = 0; i < n_fx_slots; i++)
       {
          CRect size = getViewSize();
          CRect r(0, 0, 17, 9);
@@ -141,7 +160,7 @@ CMouseEventResult CEffectSettings::onMouseUp(CPoint& where, const CButtonState& 
       if( ! ( ( buttons.getButtonState() & kLButton ) || ( buttons.getButtonState() & kRButton ) ) )
          return kMouseEventHandled;
 
-      for (int i = 0; i < 8; i++)
+      for (int i = 0; i < n_fx_slots; i++)
       {
          CRect size = getViewSize();
          CRect r(0, 0, 17, 9);

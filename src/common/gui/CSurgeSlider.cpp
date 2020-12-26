@@ -48,12 +48,15 @@ CSurgeSlider::CSurgeSlider(const CPoint& loc,
                            bool is_mod,
                            std::shared_ptr<SurgeBitmaps> bitmapStore,
                            SurgeStorage* storage)
-    : CCursorHidingControl(CRect(loc, CPoint(1, 1)), listener, tag, 0)
+    : CControl(CRect(loc, CPoint(1, 1)), listener, tag, 0), Surge::UI::CursorControlAdapterWithMouseDelta<CSurgeSlider>(storage)
 {
    this->style = stylee;
    this->is_mod = is_mod;
    
    this->storage = storage;
+
+   labfont = displayFont;
+   labfont->remember();
 
    modmode = 0;
    disabled = false;
@@ -124,7 +127,9 @@ void CSurgeSlider::setModValue(float val)
 }
 
 CSurgeSlider::~CSurgeSlider()
-{}
+{
+   labfont->forget();
+}
 
 void CSurgeSlider::setLabel(const char* txt)
 {
@@ -238,7 +243,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
          dc->setFontColor(skin->getColor(Colors::Slider::Label::Light));
       else
          dc->setFontColor(skin->getColor(Colors::Slider::Label::Dark));
-      dc->setFont(displayFont);
+      dc->setFont(labfont);
 
       //		int a = 'a' + (rand()&31);
       //		label[1] = a;
@@ -281,8 +286,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
       ColBar.alpha = (int)(slider_alpha * 255.f);
       ColBarNeg.alpha = (int)(slider_alpha * 255.f);
 
-      // float moddist = modval * range;
-      // We want modval + value to be bould by -1 and 1. So
+      // We want modval + value to be bound by -1 and 1. So:
       float modup = modval;
       float moddn = modval;
       bool overtop = false;
@@ -311,19 +315,10 @@ void CSurgeSlider::draw(CDrawContext* dc)
          overotherside = true;
          moddn = value - 1.f;
       }
-      // at some point in the future draw something special with overtop and overbot
 
+      // at some point in the future draw something special with overtop and overbot
       modup *= range;
       moddn *= range;
-
-      /*
-      if( modval != 0 )
-         std::cout << "mv=" << modval
-                   << " val=" << value
-                   << " rn=" << range
-                   << " mu=" << modup
-                   << " md=" << moddn << std::endl;
-      */
 
       std::vector<CRect> drawThese;
       std::vector<CRect> drawTheseToo;
@@ -348,6 +343,8 @@ void CSurgeSlider::draw(CDrawContext* dc)
             
             trect2.right -= 17;
             trect2.left = trect2.right - moddn;
+            if (!overotherside && overbot)
+               trect2.left += 1;
          }
 
          if (trect.left > trect.right)
@@ -368,7 +365,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
                topr.top = trect2.top;
                topr.bottom = trect2.bottom;
                topr.left = trect2.right + 1;
-               topr.right = topr.left + 3;
+               topr.right = topr.left + 4;
 
                drawTheseToo.push_back(topr);
             }
@@ -377,7 +374,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
                topr.top = trect.top;
                topr.bottom = trect.bottom;
                topr.left = trect.right + 1;
-               topr.right = topr.left + 3;
+               topr.right = topr.left + 4;
 
                drawThese.push_back(topr);
             }
@@ -391,8 +388,8 @@ void CSurgeSlider::draw(CDrawContext* dc)
             {
                topr.top = trect.top;
                topr.bottom = trect.bottom;
-               topr.left = trect.left - 4;
-               topr.right = topr.left + 3;
+               topr.left = trect.left - 3;
+               topr.right = topr.left + 1;
 
                drawThese.push_back(topr);
             }
@@ -400,8 +397,8 @@ void CSurgeSlider::draw(CDrawContext* dc)
             {
                topr.top = trect2.top;
                topr.bottom = trect2.bottom;
-               topr.left = trect2.left - 4;
-               topr.right = topr.left + 3;
+               topr.left = trect2.left - 5;
+               topr.right = topr.left + 4;
 
                drawTheseToo.push_back(topr);
             }
@@ -427,6 +424,9 @@ void CSurgeSlider::draw(CDrawContext* dc)
 
             trect2.bottom -= 17;
             trect2.top = trect2.bottom + moddn;
+            if (overotherside && overtop)
+               trect2.top += 1;
+
          }
 
          if (trect.top < trect.bottom)
@@ -444,7 +444,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
                topr.left = trect.left;
                topr.right = trect.right;
                topr.bottom = trect.top + 1;
-               topr.top = topr.bottom + 3;
+               topr.top = topr.bottom + 4;
 
                drawThese.push_back(topr);
             }
@@ -453,7 +453,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
                topr.left = trect2.left;
                topr.right = trect2.right;
                topr.bottom = trect2.top + 1;
-               topr.top = topr.bottom + 3;
+               topr.top = topr.bottom + 4;
 
                drawTheseToo.push_back(topr);
             }
@@ -468,7 +468,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
                topr.left = trect2.left;
                topr.right = trect2.right;
                topr.bottom = trect2.bottom - 1;
-               topr.top = topr.bottom - 3;
+               topr.top = topr.bottom - 4;
 
                drawTheseToo.push_back(topr);
             }
@@ -477,7 +477,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
                topr.left = trect.left;
                topr.right = trect.right;
                topr.bottom = trect.bottom - 1;
-               topr.top = topr.bottom - 3;
+               topr.top = topr.bottom - 4;
 
                drawThese.push_back(topr);
             }
@@ -506,21 +506,28 @@ void CSurgeSlider::draw(CDrawContext* dc)
 
    if (pHandle && showHandle && (modmode != 2) && (!deactivated || !disabled))
    {
+      draghandlecenter = hrect.getCenter();
+
       if (style & CSlider::kHorizontal)
       {
          pHandle->draw(dc, hrect, CPoint(0, 24 * typehy), modmode ? slider_alpha : slider_alpha);
-         if( pHandleHover && in_hover )
+         if( pHandleHover && in_hover && (!modmode) )
             pHandleHover->draw(dc, hrect, CPoint(0, 24 * typehy), modmode ? slider_alpha : slider_alpha);
+
 
          if( is_temposync )
          {
-            if( pTempoSyncHandle )
+            if (in_hover && pTempoSyncHoverHandle && (!modmode))
+            {
+               pTempoSyncHoverHandle->draw( dc, hrect, CPoint( 0, 0 ), slider_alpha );
+            }
+            else if( pTempoSyncHandle )
             {
                pTempoSyncHandle->draw(dc, hrect, CPoint(0, 0), slider_alpha);
             }
             else
             {
-               dc->setFont(displayFont);
+               dc->setFont(labfont);
                dc->setFontColor(CColor(80,80,100));
                auto newRect = hrect;
                newRect.top += 1;
@@ -543,12 +550,16 @@ void CSurgeSlider::draw(CDrawContext* dc)
       else if ((!deactivated || !disabled))
       {
          pHandle->draw(dc, hrect, CPoint(0, 28 * typehy), modmode ? slider_alpha : slider_alpha); // used to be 0x80 which was solid - lets keep taht for now
-         if( pHandleHover && in_hover )
+         if (pHandleHover && in_hover && (!modmode))
             pHandleHover->draw(dc, hrect, CPoint(0, 28 * typehy), modmode ? slider_alpha : slider_alpha); // used to be 0x80 which was solid - lets keep taht for now
 
          if( is_temposync )
          {
-            if( pTempoSyncHandle )
+            if (in_hover && pTempoSyncHoverHandle && (!modmode))
+            {
+               pTempoSyncHoverHandle->draw( dc, hrect, CPoint( 0, 0 ), slider_alpha );
+            }
+            else if( pTempoSyncHandle )
             {
                pTempoSyncHandle->draw(dc, hrect, CPoint(0, 0), slider_alpha);
             }
@@ -560,7 +571,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
                newRect.bottom = newRect.top + 20;
                newRect.right = newRect.left + 16;
                
-               dc->setFont(displayFont);
+               dc->setFont(labfont);
                dc->setFontColor(CColor(80,80,100));
                
                auto tRect = newRect;
@@ -575,9 +586,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
                dc->drawString("S", sRect, kCenterText, true);
             }
          }
-                  
       }
-
    }
 
    // draw mod-fader
@@ -622,6 +631,7 @@ void CSurgeSlider::draw(CDrawContext* dc)
          if( pHandleHover && in_hover )
             pHandleHover->draw(dc, hrect, CPoint(24, 28 * typehy), slider_alpha);
       }
+      draghandlecenter = hrect.getCenter();
    }
 
    setDirty(false);
@@ -666,6 +676,9 @@ bool CSurgeSlider::isInMouseInteraction()
 
 CMouseEventResult CSurgeSlider::onMouseDown(CPoint& where, const CButtonState& buttons)
 {
+   startPosition = where;
+   currentPosition = where;
+
    {
       auto sge = dynamic_cast<SurgeGUIEditor*>(listener);
       if( sge )
@@ -681,23 +694,24 @@ CMouseEventResult CSurgeSlider::onMouseDown(CPoint& where, const CButtonState& b
       while( editing )
          endEdit();
    wheelInitiatedEdit = false;
-   
-   CCursorHidingControl::onMouseDown(where, buttons);
 
-   if (controlstate)
-   {
-#if MAC
-      if (buttons & kRButton)
-         statezoom = 0.1f;
-#endif
-      return kMouseEventHandled;
-   }
 
    if (listener &&
        buttons & (kAlt | kRButton | kMButton | kButton4 | kButton5 | kShift | kControl | kApple | kDoubleClick))
    {
+      unenqueueCursorHideIfMoved();
+
       if (listener->controlModifierClicked(this, buttons) != 0)
-         return kMouseEventHandled;
+      {
+         return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
+      }
+   }
+
+   onMouseDownCursorHelper(where);
+
+   if (controlstate)
+   {
+      return kMouseEventHandled;
    }
 
    if ((buttons & kLButton) && !controlstate)
@@ -705,7 +719,6 @@ CMouseEventResult CSurgeSlider::onMouseDown(CPoint& where, const CButtonState& b
       beginEdit();
       controlstate = cs_drag;
       // getFrame()->setCursor( VSTGUI::kCursorHand );
-      statezoom = 1.f;
 
       edit_value = modmode ? &modval : &value;
       oldVal = *edit_value;
@@ -718,7 +731,8 @@ CMouseEventResult CSurgeSlider::onMouseDown(CPoint& where, const CButtonState& b
       if( listener )
          listener->valueChanged( this );
       
-      detachCursor(where);
+      // detachCursor(where);
+      enqueueCursorHideIfMoved(where);
       return kMouseEventHandled;
    }
    return kMouseEventHandled;
@@ -726,6 +740,7 @@ CMouseEventResult CSurgeSlider::onMouseDown(CPoint& where, const CButtonState& b
 
 CMouseEventResult CSurgeSlider::onMouseUp(CPoint& where, const CButtonState& buttons)
 {
+   unenqueueCursorHideIfMoved();
    {
       auto sge = dynamic_cast<SurgeGUIEditor*>(listener);
       if( sge )
@@ -734,12 +749,13 @@ CMouseEventResult CSurgeSlider::onMouseUp(CPoint& where, const CButtonState& but
       }
    }
 
-   CCursorHidingControl::onMouseUp(where, buttons);
+   bool resetPosition = hasBeenDraggedDuringMouseGesture;
 
    // "elastic edit" - resets to the value before the drag started if Alt is held
    if (buttons & kAlt)
    {
       hasBeenDraggedDuringMouseGesture = false;
+      resetPosition = false;
       *edit_value = oldVal;
       setDirty();
       if (isDirty() && listener)
@@ -761,8 +777,17 @@ CMouseEventResult CSurgeSlider::onMouseUp(CPoint& where, const CButtonState& but
       
       edit_value = nullptr;
 
+      if (resetPosition &&
+          startPosition != currentPosition)
+      {
+         endCursorHide(draghandlecenter);
+      }
+      else
+      {
+         endCursorHide();
+      }
 
-      attachCursor();
+      //attachCursor();
    }
 
    return kMouseEventHandled;
@@ -804,7 +829,7 @@ VSTGUI::CMouseEventResult CSurgeSlider::onMouseExited(VSTGUI::CPoint& where, con
    return kMouseEventHandled;
 }
 
-double CSurgeSlider::getMouseDeltaScaling(CPoint& where, const CButtonState& buttons)
+double CSurgeSlider::getMouseDeltaScaling(const CPoint& where, const CButtonState& buttons)
 {
    double rate;
 
@@ -819,7 +844,7 @@ double CSurgeSlider::getMouseDeltaScaling(CPoint& where, const CButtonState& but
    case kExact:
       rate = 1.0;
       break;
-   case kClassic:
+   case kLegacy:
    default:
       rate = 0.3 * moverate;
       break;
@@ -836,11 +861,12 @@ double CSurgeSlider::getMouseDeltaScaling(CPoint& where, const CButtonState& but
    return rate;
 }
 
-void CSurgeSlider::onMouseMoveDelta(CPoint& where,
+void CSurgeSlider::onMouseMoveDelta(const CPoint& where,
                                     const CButtonState& buttons,
                                     double dx,
                                     double dy)
 {
+   currentPosition = where;
    if( controlstate != cs_drag )
    {
       // FIXME - deal with modulation
@@ -991,19 +1017,26 @@ void CSurgeSlider::onSkinChanged()
 {
    if (style & CSlider::kHorizontal)
    {
-      pTray = associatedBitmapStore->getBitmap(IDB_FADERH_BG);
-      pHandle = associatedBitmapStore->getBitmap(IDB_FADERH_HANDLE);
+      pTray = associatedBitmapStore->getBitmap(IDB_SLIDER_HORIZ_BG);
+      pHandle = associatedBitmapStore->getBitmap(IDB_SLIDER_HORIZ_HANDLE);
       pTempoSyncHandle = associatedBitmapStore->getBitmapByStringID( "TEMPOSYNC_HORIZONTAL_OVERLAY" );
+      pTempoSyncHoverHandle = associatedBitmapStore->getBitmapByStringID( "TEMPOSYNC_HORIZONTAL_HOVER_OVERLAY" );
    }
    else
    {
-      pTray = associatedBitmapStore->getBitmap(IDB_FADERV_BG);
-      pHandle = associatedBitmapStore->getBitmap(IDB_FADERV_HANDLE);
+      pTray = associatedBitmapStore->getBitmap(IDB_SLIDER_VERT_BG);
+      pHandle = associatedBitmapStore->getBitmap(IDB_SLIDER_VERT_HANDLE);
       pTempoSyncHandle = associatedBitmapStore->getBitmapByStringID( "TEMPOSYNC_VERTICAL_OVERLAY" );
+      pTempoSyncHoverHandle = associatedBitmapStore->getBitmapByStringID( "TEMPOSYNC_VERTICAL_HOVER_OVERLAY" );
    }
 
    if( skinControl.get() )
    {
+      auto htr = skin->propertyValue( skinControl, "handle_tray" );
+      if( htr.isJust() )
+      {
+         pTray = associatedBitmapStore->getBitmapByStringID(htr.fromJust());
+      }
       auto hi = skin->propertyValue( skinControl, "handle_image" );
       if( hi.isJust() )
       {
@@ -1018,6 +1051,12 @@ void CSurgeSlider::onSkinChanged()
       if( ht.isJust() )
       {
          pTempoSyncHandle = associatedBitmapStore->getBitmapByStringID(ht.fromJust());
+      }
+
+      auto hth = skin->propertyValue( skinControl, "handle_temposync_hover_image" );
+      if( hth.isJust() )
+      {
+         pTempoSyncHoverHandle = associatedBitmapStore->getBitmapByStringID(hth.fromJust());
       }
    }
    

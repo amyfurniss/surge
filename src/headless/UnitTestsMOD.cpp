@@ -441,7 +441,7 @@ TEST_CASE( "ADSR Envelope Behaviour", "[mod]" )
                                   for( auto i=0; i<sz; ++i )
                                   {
                                      if( replA[i].second > 1e-5 ) // CI pipelines bounce around zero badly
-                                        REQUIRE( replA[i].second == Approx( surgeA[i].second ).margin( 1e-3 ) );
+                                        REQUIRE( replA[i].second == Approx( surgeA[i].second ).margin( 1e-2 ) );
                                   }
                                };
 
@@ -625,10 +625,11 @@ TEST_CASE( "Pitch Bend and Tuning", "[mod][tun]" )
 TEST_CASE( "MPE pitch bend", "[mod]" )
 {
    SECTION( "Channel 0 bends should be a correct global bend" )
-   {
+   { // note that this test actually checks if channel 0 bends behave like non-MPE bends
       auto surge = surgeOnSine();
       surge->mpeEnabled = true;
-      surge->mpePitchBendRange = 48;
+      surge->storage.mpePitchBendRange = 48;
+
       surge->storage.getPatch().scene[0].pbrange_up.val.i = 2;
       surge->storage.getPatch().scene[0].pbrange_dn.val.i = 2;
       
@@ -653,7 +654,8 @@ TEST_CASE( "MPE pitch bend", "[mod]" )
       auto pbr = 48;
       auto sbs = 8192 * 1.f / pbr;
       
-      surge->mpePitchBendRange = pbr;
+      surge->storage.mpePitchBendRange = pbr;
+      
       surge->storage.getPatch().scene[0].pbrange_up.val.i = 2;
       surge->storage.getPatch().scene[0].pbrange_dn.val.i = 2;
 
@@ -673,8 +675,8 @@ TEST_CASE( "MPE pitch bend", "[mod]" )
                                  on.data1 = n;
                                  on.data2 = 100;
                                  on.atSample = 100;
-                                 
-                                 off.type = Surge::Headless::Event::NOTE_ON;
+
+                                 off.type = Surge::Headless::Event::NOTE_OFF;
                                  off.channel = 1;
                                  off.data1 = n;
                                  off.data2 = 100;
@@ -690,8 +692,8 @@ TEST_CASE( "MPE pitch bend", "[mod]" )
                                  events.push_back( bend );
                                  events.push_back( off );
 
-                                 return frequencyForEvents( surge, events, 0,
-                                                            2000, 44100 * 2 - 8000 );
+                                 return frequencyForEvents(surge, events, 0, 4000,
+                                                           44100 * 2 - 8000);
                               };
 
 
@@ -719,8 +721,10 @@ TEST_CASE( "LfoTempoSync Latch Drift", "[mod]" )
       auto ss = std::make_unique<StepSequencerStorage>();
       auto lfostorage = &(surge->storage.getPatch().scene[0].lfo[0]);
       lfostorage->rate.temposync = true;
-      surge->setParameter01( lfostorage->rate.id, 0.455068, false, false );
-      lfostorage->shape.val.i = ls_square;
+      SurgeSynthesizer::ID rid;
+      surge->fromSynthSideId(lfostorage->rate.id, rid );
+      surge->setParameter01( rid, 0.455068, false, false );
+      lfostorage->shape.val.i = lt_square;
 
       surge->storage.getPatch().copy_scenedata(surge->storage.getPatch().scenedata[0], 0 );
       
@@ -844,6 +848,123 @@ TEST_CASE( "CModulationSources", "[mod]" )
          a.set_target(r);
          a.process_block();
          REQUIRE( a.output == r );
+      }
+   }
+}
+
+TEST_CASE( "Keytrack Morph", "[mod]" )
+{
+   INFO( "See issue 3046");
+   SECTION( "Run High Key" )
+   {
+      auto surge = Surge::Headless::createSurge(44100);
+      REQUIRE( surge );
+      surge->loadPatchByPath("test-data/patches/Keytrack-Morph-3046.fxp", -1, "Test" );
+      for( int i=0; i<100; ++i ) surge->process();
+
+      surge->playNote( 0, 100, 127, 0 );
+      for( int i=0; i<10; ++i )
+      {
+         surge->process();
+         /*
+          * FIXME: Make this an assertive test. What we are really checking is is l_shape 3.33 inside
+          * the oscillator but there's no easy way to assert that so just leave the test here
+          * as a debugging harness around issue 3046
+          */
+      }
+   }
+}
+
+TEST_CASE( "KeyTrack in Play Modes", "[mod]" )
+{
+   /*
+    * See issue 2892. In mono mode keytrack needs to follow held keys not just soloe playing voice
+    */
+   auto playSequence = [](std::shared_ptr<SurgeSynthesizer> surge, std::vector<int> notes,
+                          bool mpe) {
+     std::unordered_map<int,int> noteToChan;
+     int cmpe = 1;
+     for ( auto n : notes)
+     {
+        int chan = 0;
+        if( mpe )
+        {
+           if( n < 0 )
+           {
+              chan = noteToChan[-n];
+           }
+           else
+           {
+              cmpe++;
+              if( cmpe > 15 ) cmpe = 1;
+              noteToChan[n] = cmpe;
+              chan = cmpe;
+           }
+        }
+        if( n > 0 )
+        {
+           surge->playNote( chan, n, 127, 0 );
+        }
+        else
+        {
+           surge->releaseNote( chan, -n, 0 );
+        }
+        for( int i=0; i<10; ++i ) surge->process();
+     }
+   };
+
+   auto modes = {pm_poly, pm_mono, pm_mono_st, pm_mono_fp, pm_mono_st_fp};
+   auto mpe = {false, true};
+   for (auto mp : mpe)
+   {
+      for (auto m : modes)
+      {
+         auto cs = [m,mp]() {
+            auto surge = Surge::Headless::createSurge(44100 );
+            surge->mpeEnabled = mp;
+            surge->storage.getPatch().scene[0].polymode.val.i = m;
+            surge->storage.getPatch().scene[0].keytrack_root.val.i = 60;
+            return surge;
+         };
+         auto checkModes = []( std::shared_ptr<SurgeSynthesizer> surge, float low, float high, float latest )
+         {
+            REQUIRE( surge->storage.getPatch().scene[0].modsources[ms_lowest_key]->output == low );
+            REQUIRE( surge->storage.getPatch().scene[0].modsources[ms_highest_key]->output == high );
+            REQUIRE( surge->storage.getPatch().scene[0].modsources[ms_latest_key]->output == latest );
+            return true;
+         };
+         DYNAMIC_SECTION("KeyTrack Test mode=" << m << " mpe=" << mp )
+         {
+            {
+               auto surge = cs();
+               REQUIRE( checkModes( surge, 0, 0, 0 ));
+            }
+            {
+               auto surge = cs();
+               playSequence(surge, {48}, mp );
+               checkModes( surge, -1, -1, -1 );
+            }
+            {
+               auto surge = cs();
+               playSequence(surge, {48, -48}, mp );
+               checkModes( surge, 0, 0, 0 );
+            }
+            auto surge = cs();
+            {
+                auto surge = cs();
+                playSequence( surge, {48,84,36,72,-36}, mp);
+                checkModes( surge, -1, 2, 1 );
+            }
+
+            {
+               /*
+                * This is the one which fails in mono mode with the naive just-voices implementation
+                */
+               auto surge = cs();
+               playSequence(surge, {48, 84, 72}, mp );
+               checkModes( surge, -1, 2, 1 );
+            }
+         }
       }
    }
 }

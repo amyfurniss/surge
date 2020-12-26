@@ -22,6 +22,9 @@
 #include "MSEGModulationHelper.h"
 #include "DebugHelpers.h"
 #include "SkinModel.h"
+#include "UserInteractions.h"
+#include "UserDefaults.h"
+#include "version.h"
 
 using namespace std;
 
@@ -44,7 +47,7 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
                                                     Surge::ParamConfig::kHorizontal));
       // TODO don't store in the patch ?
       param_ptr.push_back(volume.assign(
-          p_id.next(), 0, "volume", "Master Volume", ct_decibel_attenuation,
+          p_id.next(), 0, "volume", "Global Volume", ct_decibel_attenuation,
           Surge::Skin::Global::master_volume,
           0, cg_GLOBAL, 0, true, Surge::ParamConfig::kHorizontal | kEasy));
    }
@@ -56,10 +59,10 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
                                         Surge::Skin::Global::scene_mode,
                                         0, cg_GLOBAL, 0, false,
                                         Surge::ParamConfig::kHorizontal | kNoPopup));
-   // param_ptr.push_back(scenemorph.assign(p_id.next(),0,"scenemorph","scenemorph",ct_percent,hmargin+gui_sec_width,gui_mid_topbar_y,0,0,0,false,Surge::ParamConfig::kHorizontal));
+   //param_ptr.push_back(scenemorph.assign(p_id.next(),0,"scenemorph","scenemorph",ct_percent,hmargin+gui_sec_width,gui_mid_topbar_y,0,0,0,false,Surge::ParamConfig::kHorizontal));
 
-   param_ptr.push_back(splitkey.assign(p_id.next(), 0, "splitkey", "Split Key", ct_midikey_or_channel,
-                                       Surge::Skin::Global::splitkey,
+   param_ptr.push_back(splitpoint.assign(p_id.next(), 0, "splitkey", "Split Point", ct_midikey_or_channel,
+                                       Surge::Skin::Scene::splitpoint,
                                         0, cg_GLOBAL, 0, false,
                                        Surge::ParamConfig::kHorizontal | kNoPopup));
    
@@ -69,7 +72,7 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
 
    // shouldnt't be stored in the patch
    param_ptr.push_back(polylimit.assign(p_id.next(), 0, "polylimit", "Polyphony Limit", ct_polylimit,
-                                        Surge::Skin::Global::polylimit,
+                                        Surge::Skin::Scene::polylimit,
                                         0, cg_GLOBAL, 0, false,
                                         Surge::ParamConfig::kHorizontal | kNoPopup));
    param_ptr.push_back(fx_bypass.assign(p_id.next(), 0, "fx_bypass", "FX Bypass", ct_fxbypass,
@@ -78,17 +81,17 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
                                         Surge::ParamConfig::kHorizontal | kNoPopup));
 
    polylimit.val.i = 16;
-   splitkey.val.i = 60;
+   splitpoint.val.i = 60;
    volume.val.f = 0;
 
-   for (int fx = 0; fx < 8; fx++)
+   for (int fx = 0; fx < n_fx_slots; fx++)
    {
       param_ptr.push_back(this->fx[fx].type.assign(p_id.next(), 0, "type", "FX Type", ct_fxtype,
-                                                   Surge::Skin::FX::fxtype,
+                                                   Surge::Skin::FX::fx_type,
                                                    0, cg_FX, fx, false, Surge::ParamConfig::kHorizontal));
       for (int p = 0; p < n_fx_params; p++)
       {
-         auto conn = Surge::Skin::Connector::connectorByID("FX.param_" + std::to_string(p+1) );
+         auto conn = Surge::Skin::Connector::connectorByID("fx.param_" + std::to_string(p+1) );
 
          char label[16];
          sprintf(label, "p%i", p);
@@ -103,9 +106,9 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
    }
 
    ParameterIDCounter::promise_t globparams_promise = p_id.tail;
-   ParameterIDCounter::promise_t scene_start_promise[2];
+   ParameterIDCounter::promise_t scene_start_promise[n_scenes];
 
-   for (int sc = 0; sc < 2; sc++)
+   for (int sc = 0; sc < n_scenes; sc++)
    {
       int sceasy =
           (sc == 0) ? kEasy
@@ -114,7 +117,7 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
       vector<Parameter*>* a;
       a = &param_ptr;
 
-      int sc_id = (sc & 1) + 1;
+      int sc_id = (sc & 1) + 1; // probably needs to change in case we want to add more scenes?
 
       scene_start_promise[sc] = p_id.tail;
 
@@ -137,7 +140,7 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
          scene[sc].osc[osc].wavetable_display_name[0] = '\0';
          
          a->push_back(scene[sc].osc[osc].type.assign(p_id.next(), id_s++, "type", "Type", ct_osctype,
-                                                     Surge::Skin::Osc::osctype,
+                                                     Surge::Skin::Osc::osc_type,
                                                      sc_id, cg_OSC, osc, false));
          a->push_back(scene[sc].osc[osc].octave.assign(p_id.next(), id_s++, "octave", "Octave",
                                                        ct_pitch_octave,
@@ -198,7 +201,7 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
       // ct_midikey
       // drift,keytrack_root
 
-      a->push_back(scene[sc].volume.assign(p_id.next(), id_s++, "volume", "Volume", ct_amplitude,
+      a->push_back(scene[sc].volume.assign(p_id.next(), id_s++, "volume", "Volume", ct_amplitude_clipper,
                                            Surge::Skin::Scene::volume,
                                            sc_id, cg_GLOBAL, 0, true,
                                             sceasy));
@@ -221,102 +224,102 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
                                                   sc_id, cg_GLOBAL, 0, true,
                                                    sceasy));
       a->push_back(scene[sc].level_o1.assign(p_id.next(), id_s++, "level_o1", "Osc 1 Level", ct_amplitude,
-                                             Surge::Skin::Mix::level_o1,
+                                             Surge::Skin::Mixer::level_o1,
                                              sc_id, cg_MIX, 0, true,
                                              sceasy));
       a->push_back(scene[sc].mute_o1.assign(p_id.next(), id_s++, "mute_o1", "Osc 1 Mute", ct_bool_mute,
-                                            Surge::Skin::Mix::mute_o1,
+                                            Surge::Skin::Mixer::mute_o1,
                                             sc_id, cg_MIX, 0, false));
       a->push_back(scene[sc].solo_o1.assign(p_id.next(), id_s++, "solo_o1", "Osc 1 Solo", ct_bool_solo,
-                                            Surge::Skin::Mix::solo_o1,
+                                            Surge::Skin::Mixer::solo_o1,
                                             sc_id, cg_MIX, 0, false, kMeta));
       a->push_back(scene[sc].route_o1.assign(p_id.next(), id_s++, "route_o1", "Osc 1 Route", ct_oscroute,
-                                             Surge::Skin::Mix::route_o1,
+                                             Surge::Skin::Mixer::route_o1,
                                              sc_id, cg_MIX, 0, false));
       a->push_back(scene[sc].level_o2.assign(p_id.next(), id_s++, "level_o2", "Osc 2 Level", ct_amplitude,
-                                             Surge::Skin::Mix::level_o2,
+                                             Surge::Skin::Mixer::level_o2,
                                              sc_id, cg_MIX, 0, true,
                                              sceasy));
       a->push_back(scene[sc].mute_o2.assign(p_id.next(), id_s++, "mute_o2", "Osc 2 Mute", ct_bool_mute,
-                                            Surge::Skin::Mix::mute_o2,
+                                            Surge::Skin::Mixer::mute_o2,
                                             sc_id, cg_MIX, 0, false));
       a->push_back(scene[sc].solo_o2.assign(p_id.next(), id_s++, "solo_o2", "Osc 2 Solo", ct_bool_solo,
-                                            Surge::Skin::Mix::solo_o2,
+                                            Surge::Skin::Mixer::solo_o2,
                                             sc_id, cg_MIX, 0, false, kMeta));
       a->push_back(scene[sc].route_o2.assign(p_id.next(), id_s++, "route_o2", "Osc 2 Route", ct_oscroute,
-                                            Surge::Skin::Mix::route_o2,
+                                            Surge::Skin::Mixer::route_o2,
                                              sc_id, cg_MIX, 0, false));
       a->push_back(scene[sc].level_o3.assign(p_id.next(), id_s++, "level_o3", "Osc 3 Level", ct_amplitude,
-                                             Surge::Skin::Mix::level_o3,
+                                             Surge::Skin::Mixer::level_o3,
                                              sc_id, cg_MIX, 0, true,
                                              sceasy));
       a->push_back(scene[sc].mute_o3.assign(p_id.next(), id_s++, "mute_o3", "Osc 3 Mute", ct_bool_mute,
-                                            Surge::Skin::Mix::mute_o3,
+                                            Surge::Skin::Mixer::mute_o3,
                                               sc_id, cg_MIX, 0, false));
       a->push_back(scene[sc].solo_o3.assign(p_id.next(), id_s++, "solo_o3", "Osc 3 Solo", ct_bool_solo,
-                                            Surge::Skin::Mix::solo_o3,
+                                            Surge::Skin::Mixer::solo_o3,
                                             sc_id, cg_MIX, 0, false, kMeta));
       a->push_back(scene[sc].route_o3.assign(p_id.next(), id_s++, "route_o3", "Osc 3 Route", ct_oscroute,
-                                             Surge::Skin::Mix::route_o3,
+                                             Surge::Skin::Mixer::route_o3,
                                              sc_id, cg_MIX, 0, false));
       a->push_back(scene[sc].level_ring_12.assign(p_id.next(), id_s++, "level_ring12", "Ring Modulation 1x2 Level",
                                                   ct_amplitude,
-                                                  Surge::Skin::Mix::level_ring12,
+                                                  Surge::Skin::Mixer::level_ring12,
                                                   sc_id, cg_MIX, 0, true,
                                                    sceasy));
       a->push_back(scene[sc].mute_ring_12.assign(p_id.next(), id_s++, "mute_ring12", "Ring Modulation 1x2 Mute",
                                                  ct_bool_mute,
-                                                 Surge::Skin::Mix::mute_ring12,
+                                                 Surge::Skin::Mixer::mute_ring12,
                                                  sc_id, cg_MIX, 0,
                                                  false));
       a->push_back(scene[sc].solo_ring_12.assign(p_id.next(), id_s++, "solo_ring12", "Ring Modulation 1x2 Solo",
                                                  ct_bool_solo,
-                                                 Surge::Skin::Mix::solo_ring12,
+                                                 Surge::Skin::Mixer::solo_ring12,
                                                  sc_id, cg_MIX, 0,
                                                  false, kMeta));
       a->push_back(scene[sc].route_ring_12.assign(p_id.next(), id_s++, "route_ring12", "Ring Modulation 1x2 Route",
                                                   ct_oscroute,
-                                                  Surge::Skin::Mix::route_ring12, sc_id, cg_MIX, 0,
+                                                  Surge::Skin::Mixer::route_ring12, sc_id, cg_MIX, 0,
                                                   false));
       a->push_back(scene[sc].level_ring_23.assign(p_id.next(), id_s++, "level_ring23", "Ring Modulation 2x3 Level",
                                                   ct_amplitude,
-                                                  Surge::Skin::Mix::level_ring23,
+                                                  Surge::Skin::Mixer::level_ring23,
                                                   sc_id, cg_MIX, 0, true,
                                                   sceasy));
       a->push_back(scene[sc].mute_ring_23.assign(p_id.next(), id_s++, "mute_ring23", "Ring Modulation 2x3 Mute",
                                                  ct_bool_mute,
-                                                 Surge::Skin::Mix::mute_ring23,
+                                                 Surge::Skin::Mixer::mute_ring23,
                                                  sc_id, cg_MIX, 0,
                                                  false));
       a->push_back(scene[sc].solo_ring_23.assign(p_id.next(), id_s++, "solo_ring23", "Ring Modulation 2x3 Solo",
                                                  ct_bool_solo,
-                                                 Surge::Skin::Mix::solo_ring23,
+                                                 Surge::Skin::Mixer::solo_ring23,
                                                  sc_id, cg_MIX, 0,
                                                  false, kMeta));
       a->push_back(scene[sc].route_ring_23.assign(p_id.next(), id_s++, "route_ring23", "Ring Modulation 2x3 Route",
                                                   ct_oscroute,
-                                                  Surge::Skin::Mix::route_ring23, sc_id, cg_MIX, 0,
+                                                  Surge::Skin::Mixer::route_ring23, sc_id, cg_MIX, 0,
                                                   false));
       a->push_back(scene[sc].level_noise.assign(p_id.next(), id_s++, "level_noise", "Noise Level",
                                                 ct_amplitude,
-                                                Surge::Skin::Mix::level_noise,
+                                                Surge::Skin::Mixer::level_noise,
                                                 sc_id, cg_MIX, 0, true,
                                                  sceasy));
       a->push_back(scene[sc].mute_noise.assign(p_id.next(), id_s++, "mute_noise", "Noise Mute",
                                                ct_bool_mute,
-                                               Surge::Skin::Mix::mute_noise, sc_id, cg_MIX, 0,
+                                               Surge::Skin::Mixer::mute_noise, sc_id, cg_MIX, 0,
                                                false));
       a->push_back(scene[sc].solo_noise.assign(p_id.next(), id_s++, "solo_noise", "Noise Solo",
                                                ct_bool_solo,
-                                               Surge::Skin::Mix::solo_noise, sc_id, cg_MIX, 0, false,
+                                               Surge::Skin::Mixer::solo_noise, sc_id, cg_MIX, 0, false,
                                                kMeta));
       a->push_back(scene[sc].route_noise.assign(p_id.next(), id_s++, "route_noise", "Noise Route",
                                                 ct_oscroute,
-                                                Surge::Skin::Mix::route_noise, sc_id, cg_MIX, 0,
+                                                Surge::Skin::Mixer::route_noise, sc_id, cg_MIX, 0,
                                                 false));
       a->push_back(scene[sc].level_pfg.assign(p_id.next(), id_s++, "level_pfg", "Pre-Filter Gain",
                                               ct_decibel,
-                                              Surge::Skin::Mix::level_prefiltergain, sc_id, cg_MIX, 0, true,
+                                              Surge::Skin::Mixer::level_prefiltergain, sc_id, cg_MIX, 0, true,
                                               sceasy));
 
       int pbx = 164, pby = 112;
@@ -334,7 +337,7 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
                                               sceasy));
       a->push_back(scene[sc].vca_velsense.assign(p_id.next(), id_s++, "vca_velsense", "Velocity > VCA Gain",
                                                  ct_decibel_attenuation,
-                                                 Surge::Skin::Scene::velocity_sensitivity, sc_id, cg_GLOBAL,
+                                                 Surge::Skin::Scene::vel_sensitivity, sc_id, cg_GLOBAL,
                                                  0, false));
 
       a->push_back(scene[sc].feedback.assign(p_id.next(), id_s++, "feedback", "Feedback",
@@ -364,7 +367,7 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
           Surge::Skin::Filter::waveshaper_drive, sc_id, cg_GLOBAL, 0, true,
           sceasy));
 
-      for (int f = 0; f < 2; f++)
+      for (int f = 0; f < n_filterunits_per_scene; f++)
       {
          a->push_back(scene[sc].filterunit[f].type.assign(p_id.next(), id_s++, "type", "Type",
                                                           ct_filtertype,
@@ -405,11 +408,11 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
       }
 
       // scene[sc].filterunit[0].type.val.i = 1;
-      for (int e = 0; e < 2; e++)
+      for (int e = 0; e < 2; e++)   // 2 = we have two envelopes, filter and amplifier
       {
-         std::string envs = "AEG.";
+         std::string envs = "aeg.";
          if( e == 1 )
-            envs = "FEG.";
+            envs = "feg.";
 
          /*
           * Since the connectors are in a namespace and here we have a loop over two
@@ -453,7 +456,7 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
          char label[32];
 
          sprintf(label, "lfo%i_shape", l);
-         a->push_back(scene[sc].lfo[l].shape.assign(p_id.next(), id_s++, label, "Shape", ct_lfoshape,
+         a->push_back(scene[sc].lfo[l].shape.assign(p_id.next(), id_s++, label, "Type", ct_lfotype,
                                                     Surge::Skin::LFO::shape, sc_id, cg_LFO, ms_lfo1 + l));
 
          sprintf(label, "lfo%i_rate", l);
@@ -475,14 +478,14 @@ SurgePatch::SurgePatch(SurgeStorage* storage)
                                                         sceasy));
          sprintf(label, "lfo%i_deform", l);
          a->push_back(scene[sc].lfo[l].deform.assign(p_id.next(), id_s++, label, "Deform",
-                                                     ct_percent_bidirectional,
+                                                     ct_lfodeform,
                                                      Surge::Skin::LFO::deform, sc_id,
                                                      cg_LFO, ms_lfo1 + l, true));
 
          sprintf(label, "lfo%i_trigmode", l);
          a->push_back(scene[sc].lfo[l].trigmode.assign(p_id.next(), id_s++, label, "Trigger Mode",
                                                        ct_lfotrigmode,
-                                                       Surge::Skin::LFO::triggermode, sc_id,
+                                                       Surge::Skin::LFO::trigger_mode, sc_id,
                                                        cg_LFO, ms_lfo1 + l, false,
                                                        kNoPopup));
          sprintf(label, "lfo%i_unipolar", l);
@@ -611,7 +614,7 @@ void SurgePatch::init_default_values()
 
    character.val.i = 1;
 
-   for (int sc = 0; sc < 2; sc++)
+   for (int sc = 0; sc < n_scenes; sc++)
    {
       for (auto& osc : scene[sc].osc)
       {
@@ -747,7 +750,7 @@ void SurgePatch::copy_globaldata(pdata* d)
       d[i].i = param_ptr[i]->val.i; // int is safer (no exceptions or anything)
    }
 }
-// pdata scenedata[2][n_scene_params];
+// pdata scenedata[n_scenes][n_scene_params];
 
 void SurgePatch::update_controls(bool init,
                                  void* init_osc, // init_osc is the pointer to the data structure of a particular osc to init
@@ -780,7 +783,7 @@ void SurgePatch::update_controls(bool init,
 
    if( from_streaming )
    {
-       for( int i=0; i<8; ++i )
+      for (int i = 0; i < n_fx_slots; ++i)
        {
            if(fx[i].type.val.i != fxt_off)
            {
@@ -808,7 +811,7 @@ void SurgePatch::do_morph()
 struct patch_header
 {
    char tag[4];
-   unsigned int xmlsize, wtsize[2][3];
+   unsigned int xmlsize, wtsize[2][3];  // TODO: FIX SCENE AND OSC COUNT ASSUMPTION (but also since it's used in streaming, do it with care!)
 };
 #pragma pack(pop)
 
@@ -918,7 +921,7 @@ void SurgePatch::load_patch(const void* data, int datasize, bool preset)
       load_xml(dr, ph->xmlsize, preset);
       dr += ph->xmlsize;
 
-      for (int sc = 0; sc < 2; sc++)
+      for (int sc = 0; sc < n_scenes; sc++)
       {
          for (int osc = 0; osc < n_oscs; osc++)
          {
@@ -971,8 +974,8 @@ unsigned int SurgePatch::save_patch(void** data)
    memcpy(header.tag, "sub3", 4);
    size_t xmlsize = save_xml(&xmldata);
    header.xmlsize = vt_write_int32LE(xmlsize);
-   wt_header wth[2][n_oscs];
-   for (int sc = 0; sc < 2; sc++)
+   wt_header wth[n_scenes][n_oscs];
+   for (int sc = 0; sc < n_scenes; sc++)
    {
       for (int osc = 0; osc < n_oscs; osc++)
       {
@@ -1004,7 +1007,7 @@ unsigned int SurgePatch::save_patch(void** data)
    dw += xmlsize;
    free(xmldata);
 
-   for (int sc = 0; sc < 2; sc++)
+   for (int sc = 0; sc < n_scenes; sc++)
    {
       for (int osc = 0; osc < n_oscs; osc++)
       {
@@ -1065,10 +1068,11 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
    }
 
    // clear old routings
-   scene[0].modulation_scene.clear();
-   scene[0].modulation_voice.clear();
-   scene[1].modulation_scene.clear();
-   scene[1].modulation_voice.clear();
+   for (int sc = 0; sc < n_scenes; sc++)
+   {
+      scene[sc].modulation_scene.clear();
+      scene[sc].modulation_voice.clear();
+   }
    modulation_global.clear();
 
    for (auto& i : fx)
@@ -1082,6 +1086,17 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
    patch->QueryIntAttribute("revision", &revision);
    streamingRevision = revision;
    currentSynthStreamingRevision = ff_revision;
+
+   if( revision > ff_revision )
+   {
+      std::ostringstream oss;
+      oss << "The version of Surge you are running is older than the version with which this patch "
+          << "was created. Your version of surge (" << Surge::Build::FullVersionStr << ") has a "
+          << "streaming revision of " << ff_revision << ", whereas the patch you are loading was "
+          << "created with " << revision << ". Features of the patch will not be available in your "
+          << "session. You can always find the latest Surge at https://surge-synthesizer.github.io/";
+      Surge::UserInteractions::promptError( oss.str(), "Surge Version is Older than Patch" );
+   }
    
    TiXmlElement* meta =  TINYXML_SAFE_TO_ELEMENT(patch->FirstChild("meta"));
    if (meta)
@@ -1217,6 +1232,16 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
                param_ptr[i]->porta_curve = porta_lin;
          }
 
+
+         if ((p->QueryIntAttribute("deform_type", &j) == TIXML_SUCCESS))
+            param_ptr[i]->deform_type = j;
+         else
+         {
+            if (param_ptr[i]->has_deformoptions())
+               param_ptr[i]->deform_type = type_1;
+         }
+
+
          if ((p->QueryIntAttribute("deactivated", &j) == TIXML_SUCCESS))
          {
             if(j == 1)
@@ -1295,19 +1320,40 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
 
    if (scene[0].pbrange_up.val.i & 0xffffff00) // is outside range, it must have been save
    {
-      scene[0].pbrange_up.val.i = (int)scene[0].pbrange_up.val.f;
-      scene[0].pbrange_dn.val.i = (int)scene[0].pbrange_dn.val.f;
-      scene[1].pbrange_up.val.i = (int)scene[1].pbrange_up.val.f;
-      scene[1].pbrange_dn.val.i = (int)scene[1].pbrange_dn.val.f;
+      for (int sc = 0; sc < n_scenes; sc++)
+      {
+         scene[sc].pbrange_up.val.i = (int)scene[sc].pbrange_up.val.f;
+         scene[sc].pbrange_dn.val.i = (int)scene[sc].pbrange_dn.val.f;
+      }
+   }
+
+   TiXmlElement* nonparamconfig =  TINYXML_SAFE_TO_ELEMENT(patch->FirstChild("nonparamconfig"));
+   if( nonparamconfig )
+   {
+      for( int sc=0; sc < n_scenes; ++sc )
+      {
+         std::string mvname = "monoVoicePrority_" + std::to_string(sc);
+         auto *mv1 = TINYXML_SAFE_TO_ELEMENT(nonparamconfig->FirstChild( mvname.c_str() ));
+         storage->getPatch().scene[sc].monoVoicePriorityMode = ALWAYS_LATEST;
+         if( mv1 )
+         {
+            // Get value
+            int mvv;
+            if( mv1->QueryIntAttribute("v", &mvv ) == TIXML_SUCCESS )
+            {
+               storage->getPatch().scene[sc].monoVoicePriorityMode = (MonoVoicePriorityMode)mvv;
+            }
+         }
+      }
    }
 
    if (revision < 1)
    {
-
-      scene[0].adsr[0].a_s.val.i = limit_range(scene[0].adsr[0].a_s.val.i + 1, 0, 2);
-      scene[0].adsr[1].a_s.val.i = limit_range(scene[0].adsr[1].a_s.val.i + 1, 0, 2);
-      scene[1].adsr[0].a_s.val.i = limit_range(scene[1].adsr[0].a_s.val.i + 1, 0, 2);
-      scene[1].adsr[1].a_s.val.i = limit_range(scene[1].adsr[1].a_s.val.i + 1, 0, 2);
+      for (int sc = 0; sc < n_scenes; sc++)
+      {
+         scene[sc].adsr[0].a_s.val.i = limit_range(scene[sc].adsr[0].a_s.val.i + 1, 0, 2);
+         scene[sc].adsr[1].a_s.val.i = limit_range(scene[sc].adsr[1].a_s.val.i + 1, 0, 2);
+      }
    }
 
    if (revision < 2)
@@ -1336,11 +1382,11 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
             case fut_lpmoog:
                u.subtype.val.i = 3;
                break;
-            case fut_comb:
+            case fut_14_comb:
                u.subtype.val.i = 1;
                break;
             case fut_SNH: // SNH replaced comb_neg in rev 4
-               u.type.val.i = fut_comb;
+               u.type.val.i = fut_14_comb;
                u.subtype.val.i = 3;
                break;
             }
@@ -1356,7 +1402,7 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
          {
             if (u.type.val.i == fut_SNH) // misc replaced comb_neg in rev 4
             {
-               u.type.val.i = fut_comb;
+               u.type.val.i = fut_14_comb;
                u.subtype.val.i += 2;
             }
          }
@@ -1367,7 +1413,7 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
    {
       for (auto& sc : scene)
       {
-         if (sc.filterblock_configuration.val.i == fb_stereo)
+         if (sc.filterblock_configuration.val.i == fc_stereo)
          {
             sc.pan.val.f = -1.f;
             sc.width.val.f = 1.f;
@@ -1407,14 +1453,14 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
             {
                u.subtype.val.i = (revision < 6) ? st_SVF : st_Rough;
             }
-            else if (u.type.val.i == fut_br12)
+            else if (u.type.val.i == fut_notch12)
             {
                u.subtype.val.i = 1;
             }
          }
 
          // convert pan2 to width
-         if (sc.filterblock_configuration.val.i == fb_stereo)
+         if (sc.filterblock_configuration.val.i == fc_stereo)
          {
             float pan1 = sc.pan.val.f;
             float pan2 = sc.width.val.f;
@@ -1433,14 +1479,111 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
       character.val.i = 0;
    }
 
+   if( revision < 15 )
+   {
+      // The Great Filter Remap of issue #3006
+      for (auto& sc : scene)
+      {
+         sc.monoVoicePriorityMode = NOTE_ON_LATEST_RETRIGGER_HIGHEST; // Older patches use Legacy mode
+         for (int u = 0; u < n_filterunits_per_scene; u++)
+         {
+            auto* fu = &(sc.filterunit[u]);
+            fu_type_sv14 futy = (fu_type_sv14)(fu->type.val.i);
+            auto subtype = fu->subtype.val.i;
+
+            switch (futy)
+            {
+            case fut_14_none:
+            case fut_14_lp12:
+            case fut_14_lp24:
+            case fut_14_lpmoog:
+            case fut_14_hp12:
+            case fut_14_hp24:
+            case fut_14_SNH:
+            case fut_14_vintageladder:
+            case fut_14_obxd_4pole:
+            case fut_14_k35_lp:
+            case fut_14_k35_hp:
+            case fut_14_diode:
+            case fut_14_cutoffwarp_lp:
+            case fut_14_cutoffwarp_hp:
+            case fut_14_cutoffwarp_n:
+            case fut_14_cutoffwarp_bp:
+            case n_fu_14_types:
+               // These types were unchanged
+               break;
+            case fut_14_obxd_2pole: {
+               int newtype = subtype % 4;
+               int newsub = (subtype < 4 ? 0 : 1);
+               fu->subtype.val.i = newsub;
+               switch (newtype)
+               {
+               case 0:
+                  fu->type.val.i = fut_obxd_2pole_lp;
+                  break;
+               case 1:
+                  fu->type.val.i = fut_obxd_2pole_bp;
+                  break;
+               case 2:
+                  fu->type.val.i = fut_obxd_2pole_hp;
+                  break;
+               case 3:
+                  fu->type.val.i = fut_obxd_2pole_n;
+                  break;
+               }
+               break;
+            }
+            case fut_14_bp12:
+               if (subtype < 3)
+               {
+                  fu->type.val.i = fut_bp12;
+                  fu->subtype.val.i = subtype;
+               }
+               else if (subtype >= 3 && subtype < 6)
+               {
+                  fu->type.val.i = fut_bp24;
+                  fu->subtype.val.i = subtype - 3;
+               }
+               break;
+            case fut_14_notch12:
+               if (subtype < 2)
+               {
+                  fu->type.val.i = fut_notch12;
+                  fu->subtype.val.i = subtype;
+               }
+               else if (subtype >= 2 && subtype < 4)
+               {
+                  fu->type.val.i = fut_notch24;
+                  fu->subtype.val.i = subtype - 2;
+               }
+
+               break;
+            case fut_14_comb:
+               // subtypes 1 and 2 become positive, subtypes 3 and 4 become negative
+               if (subtype == 0 || subtype == 1)
+               {
+                  fu->type.val.i = fut_comb_pos;
+                  fu->subtype.val.i = subtype;
+               }
+               else if (subtype == 2 || subtype == 3)
+               {
+                  fu->type.val.i = fut_comb_neg;
+                  fu->subtype.val.i = subtype - 2;
+               }
+               break;
+            }
+         }
+      }
+   }
    // ensure that filtersubtype is a valid value
    for (auto& sc : scene)
    {
-      for (int u = 0; u < 2; u++)
+      for (int u = 0; u < n_filterunits_per_scene; u++)
       {
-         sc.filterunit[0].subtype.val.i =
-             limit_range(sc.filterunit[0].subtype.val.i, 0,
-                         max(0, fut_subcount[sc.filterunit[0].type.val.i] - 1));
+         sc.filterunit[u].subtype.val.i =
+             limit_range(sc.filterunit[u].subtype.val.i, 0,
+                         max(0, fut_subcount[sc.filterunit[u].type.val.i] - 1));
+         sc.filterunit[u].type.set_user_data(&patchFilterSelectorMapper );
       }
    }
 
@@ -1449,7 +1592,7 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
    */
 
    // Blank out the display names
-   for (int sc = 0; sc < 2; sc++)
+   for (int sc = 0; sc < n_scenes; sc++)
    {
       for (int osc = 0; osc < n_oscs; osc++)
       {
@@ -1504,54 +1647,26 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
           (p->QueryIntAttribute("i", &lfo) == TIXML_SUCCESS) && within_range(0, sc, 1) &&
           within_range(0, lfo, n_lfos - 1))
       {
-         if (p->QueryDoubleAttribute("shuffle", &d) == TIXML_SUCCESS)
-            stepsequences[sc][lfo].shuffle = (float)d;
-         if (p->QueryIntAttribute("loop_start", &j) == TIXML_SUCCESS)
-            stepsequences[sc][lfo].loop_start = j;
-         if (p->QueryIntAttribute("loop_end", &j) == TIXML_SUCCESS)
-            stepsequences[sc][lfo].loop_end = j;
-         if (p->QueryIntAttribute("trigmask", &j) == TIXML_SUCCESS)
-            stepsequences[sc][lfo].trigmask = j;
+         stepSeqFromXmlElement(&(stepsequences[sc][lfo]), p );
 
-         if (p->QueryIntAttribute("trigmask_0to15", &j ) == TIXML_SUCCESS )
-         {
-            stepsequences[sc][lfo].trigmask &= 0xFFFFFFFFFFFF0000;
-            j &= 0xFFFF;
-            stepsequences[sc][lfo].trigmask |= j;
-         };
-         if (p->QueryIntAttribute("trigmask_16to31", &j ) == TIXML_SUCCESS )
-         {
-            stepsequences[sc][lfo].trigmask &= 0xFFFFFFFF0000FFFF;
-            j &= 0xFFFF;
-            uint64_t jl = (uint64_t)j;
-            stepsequences[sc][lfo].trigmask |= jl << 16;
-         };
-         if (p->QueryIntAttribute("trigmask_32to47", &j ) == TIXML_SUCCESS )
-         {
-            stepsequences[sc][lfo].trigmask &= 0xFFFF0000FFFFFFFF;
-            j &= 0xFFFF;
-            uint64_t jl = (uint64_t)j;
-            stepsequences[sc][lfo].trigmask |= jl << 32;
-         };
-         
-         for (int s = 0; s < n_stepseqsteps; s++)
-         {
-            char txt[256];
-            sprintf(txt, "s%i", s);
-            if (p->QueryDoubleAttribute(txt, &d) == TIXML_SUCCESS)
-               stepsequences[sc][lfo].steps[s] = (float)d;
-            else
-               stepsequences[sc][lfo].steps[s] = 0.f;
-         }
       }
       p = TINYXML_SAFE_TO_ELEMENT(p->NextSibling("sequence"));
    }
 
-   // restore msegs
-   for (auto& ms : msegs )
-      for (auto& l : ms )
+   // restore msegs. We optionally don't restore the snap from patch
+   bool userPrefRestoreMSEGFromPatch = Surge::Storage::getUserDefaultValue(storage, "restoreMSEGSnapFromPatch", true );
+   for (int s=0;s<n_scenes;++s)
+      for (int m=0; m<n_lfos; ++m )
       {
-         ms->n_activeSegments = 0;
+         auto *ms = &( msegs[s][m] );
+         if( ms_lfo1 + m >= ms_slfo1 && ms_lfo1 + m <= ms_slfo6 )
+         {
+            Surge::MSEG::createInitSceneMSEG(ms);
+         }
+         else
+         {
+            Surge::MSEG::createInitVoiceMSEG(ms);
+         }
          Surge::MSEG::rebuildCache(ms);
       }
 
@@ -1567,37 +1682,8 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
       auto mi = 0;
       if( p->QueryIntAttribute( "i", &v ) == TIXML_SUCCESS ) mi = v;
       auto *ms = &( msegs[sc][mi] );
-      ms->n_activeSegments = 0;
-      if( p->QueryIntAttribute( "activeSegments", &v ) == TIXML_SUCCESS ) ms->n_activeSegments = v;
-      auto segs = TINYXML_SAFE_TO_ELEMENT(p->FirstChild( "segments" ));
-      if( segs )
-      {
-         auto seg = TINYXML_SAFE_TO_ELEMENT(segs->FirstChild( "segment" ) );
-         int idx = 0;
-         while( seg )
-         {
-            double d;
-#define MSGF(x) if( seg->QueryDoubleAttribute( #x, &d ) == TIXML_SUCCESS ) ms->segments[idx].x = d;
-            MSGF( duration );
-            MSGF( v0 );
-            MSGF( cpduration );
-            MSGF( cpv );
-            
-            int t = 0;
-            if( seg->QueryIntAttribute( "type", &v ) == TIXML_SUCCESS ) t = v;
-            ms->segments[idx].type = (MSEGStorage::segment::Type)t;
-            
-            seg = TINYXML_SAFE_TO_ELEMENT( seg->NextSibling( "segment" ) );
-            
-            idx++;
-         }
-         if( idx != ms->n_activeSegments )
-         {
-            std::cout << "BAD RESTORE " << _D(idx) << _D(ms->n_activeSegments) << std::endl;
-         }
-      }
-      // Rebuild cache
-      Surge::MSEG::rebuildCache(ms);
+
+      msegFromXMLElement(ms, p, userPrefRestoreMSEGFromPatch );
       p = TINYXML_SAFE_TO_ELEMENT( p->NextSibling( "mseg" ) );
    }
 
@@ -1674,10 +1760,82 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
        {
            int ival;
            TiXmlElement *p;
+
+           // This has a lecacy name since it was from before we moved into the editor object
            p = TINYXML_SAFE_TO_ELEMENT(de->FirstChild("instanceZoomFactor"));
            if( p &&
                p->QueryIntAttribute("v",&ival) == TIXML_SUCCESS)
-               dawExtraState.instanceZoomFactor = ival;
+               dawExtraState.editor.instanceZoomFactor = ival;
+
+           // This is the non-legacy way to save editor state
+           p = TINYXML_SAFE_TO_ELEMENT( de->FirstChild( "editor" ) );
+           if( p )
+           {
+              if( p->QueryIntAttribute( "current_scene", &ival ) == TIXML_SUCCESS )
+                 dawExtraState.editor.current_scene = ival;
+
+              if( p->QueryIntAttribute( "current_fx", &ival ) == TIXML_SUCCESS )
+                 dawExtraState.editor.current_fx = ival;
+
+              if( p->QueryIntAttribute( "modsource", &ival ) == TIXML_SUCCESS )
+                 dawExtraState.editor.modsource = (modsources)ival;
+
+              if( p->QueryIntAttribute( "isMSEGOpen", &ival) == TIXML_SUCCESS )
+                 dawExtraState.editor.isMSEGOpen = ival;
+              else
+                 dawExtraState.editor.isMSEGOpen = false;
+
+              // Just to be sure, even though constructor should do this
+              dawExtraState.editor.msegStateIsPopulated = false;
+              for( int sc=0; sc<n_scenes; sc++ )
+              {
+                 std::string con = "current_osc_" + std::to_string( sc );
+                 if( p->QueryIntAttribute( con.c_str(), &ival ) == TIXML_SUCCESS )
+                    dawExtraState.editor.current_osc[sc] = ival;
+                 con = "modsource_editor_" + std::to_string( sc );
+                 if( p->QueryIntAttribute( con.c_str(), &ival ) == TIXML_SUCCESS )
+                    dawExtraState.editor.modsource_editor[sc] = (modsources)ival;
+
+                 for (int lf = 0; lf < n_lfos; ++lf)
+                 {
+                    std::string msns =
+                        "mseg_state_" + std::to_string(sc) + "_" + std::to_string(lf);
+                    auto mss = TINYXML_SAFE_TO_ELEMENT(p->FirstChild(msns));
+                    if (mss)
+                    {
+                       dawExtraState.editor.msegStateIsPopulated = true;
+                       auto q = &(dawExtraState.editor.msegEditState[sc][lf]);
+
+                       double dv;
+                       int vv;
+                       if (! userPrefRestoreMSEGFromPatch && mss->QueryDoubleAttribute("hSnap", &dv) == TIXML_SUCCESS)
+                          msegs[sc][lf].hSnap = dv;
+
+                       if (mss->QueryDoubleAttribute("hSnapDefault", &dv) == TIXML_SUCCESS)
+                       {
+                          // This is a case where we have the hSnapDefaul tin the DAW extra state
+                          // from the majority of the 18 run so at least try
+                          if (msegs[sc][lf].hSnapDefault == MSEGStorage::defaultHSnapDefault)
+                          {
+                             msegs[sc][lf].hSnapDefault = dv;
+                          }
+                       }
+                       if (! userPrefRestoreMSEGFromPatch && mss->QueryDoubleAttribute("vSnap", &dv) == TIXML_SUCCESS)
+                          msegs[sc][lf].vSnap = dv;
+                       if (mss->QueryDoubleAttribute("vSnapDefault", &dv) == TIXML_SUCCESS)
+                       {
+                          if (msegs[sc][lf].vSnapDefault == MSEGStorage::defaultVSnapDefault)
+                          {
+                             msegs[sc][lf].vSnapDefault = dv;
+                          }
+                       }
+                       if (mss->QueryIntAttribute("timeEditMode", &vv) == TIXML_SUCCESS)
+                          q->timeEditMode = vv;
+                    }
+                 }
+              }
+           }
+
 
            p = TINYXML_SAFE_TO_ELEMENT(de->FirstChild("mpeEnabled"));
            if( p &&
@@ -1689,8 +1847,13 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
                p->QueryIntAttribute("v",&ival) == TIXML_SUCCESS)
                dawExtraState.mpePitchBendRange = ival;
 
+          p = TINYXML_SAFE_TO_ELEMENT(de->FirstChild("monoPedalMode"));
+          if( p &&
+              p->QueryIntAttribute("v",&ival) == TIXML_SUCCESS)
+             dawExtraState.monoPedalMode = ival;
 
-           p = TINYXML_SAFE_TO_ELEMENT(de->FirstChild("hasTuning"));
+
+          p = TINYXML_SAFE_TO_ELEMENT(de->FirstChild("hasTuning"));
            if( p &&
                p->QueryIntAttribute("v",&ival) == TIXML_SUCCESS)
            {
@@ -1765,10 +1928,30 @@ void SurgePatch::load_xml(const void* data, int datasize, bool is_preset)
       TiXmlElement* mw = TINYXML_SAFE_TO_ELEMENT(patch->FirstChild("modwheel"));
       if (mw)
       {
-         if (mw->QueryDoubleAttribute("s0", &d) == TIXML_SUCCESS)
-            ((ControllerModulationSource*)scene[0].modsources[ms_modwheel])->set_target(d);
-         if (mw->QueryDoubleAttribute("s1", &d) == TIXML_SUCCESS)
-            ((ControllerModulationSource*)scene[1].modsources[ms_modwheel])->set_target(d);
+         for (int sc = 0; sc < n_scenes; sc++)
+         {
+            char str[32];
+            snprintf(str, 32, "s%d", sc);
+            if (mw->QueryDoubleAttribute(str, &d) == TIXML_SUCCESS)
+            {
+               ((ControllerModulationSource*)scene[sc].modsources[ms_modwheel])->set_target(d);
+            }
+         }
+      }
+   }
+
+   TiXmlElement *compat = TINYXML_SAFE_TO_ELEMENT(patch->FirstChild("compatability"));
+   correctlyTuneCombFilter = streamingRevision >= 14; // Tune correctly for all releases 18 and later
+   if( compat )
+   {
+      auto comb = TINYXML_SAFE_TO_ELEMENT(compat->FirstChild("correctlyTuneCombFilter"));
+      if (comb)
+      {
+         int i;
+         if( comb->QueryIntAttribute( "v", &i ) == TIXML_SUCCESS )
+         {
+            correctlyTuneCombFilter = i != 0;
+         }
       }
    }
 }
@@ -1882,6 +2065,8 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
             p.SetAttribute("porta_retrigger", param_ptr[i]->porta_retrigger ? "1" : "0");
             p.SetAttribute("porta_curve", param_ptr[i]->porta_curve);
          }
+         if (param_ptr[i]->has_deformoptions())
+            p.SetAttribute("deform_type", param_ptr[i]->deform_type);
 
          // param_ptr[i]->val.i;
          parameters.InsertEndChild(p);
@@ -1889,8 +2074,19 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
    }
    patch.InsertEndChild(parameters);
 
+   // TODO: Stream that priority mode here
+   TiXmlElement nonparamconfig( "nonparamconfig" );
+   for( int sc=0; sc < n_scenes; ++sc )
+   {
+      std::string mvname = "monoVoicePrority_" + std::to_string(sc);
+      TiXmlElement mvv(mvname.c_str());
+      mvv.SetAttribute("v", storage->getPatch().scene[sc].monoVoicePriorityMode);
+      nonparamconfig.InsertEndChild(mvv);
+   }
+   patch.InsertEndChild(nonparamconfig);
+
    TiXmlElement eod( "extraoscdata" );
-   for( int sc=0; sc<2; ++sc )
+   for (int sc = 0; sc < n_scenes; ++sc)
    {
       for( int os=0; os<n_oscs; ++os )
       {
@@ -1909,42 +2105,19 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
      
    
    TiXmlElement ss("stepsequences");
-   for (int sc = 0; sc < 2; sc++)
+   for (int sc = 0; sc < n_scenes; sc++)
    {
       for (int l = 0; l < n_lfos; l++)
       {
-         if (scene[sc].lfo[l].shape.val.i == ls_stepseq)
+         if (scene[sc].lfo[l].shape.val.i == lt_stepseq)
          {
             char txt[256], txt2[256];
             TiXmlElement p("sequence");
             p.SetAttribute("scene", sc);
             p.SetAttribute("i", l);
 
-            for (int s = 0; s < n_stepseqsteps; s++)
-            {
-               sprintf(txt, "s%i", s);
-               if (stepsequences[sc][l].steps[s] != 0.f)
-                  p.SetAttribute(txt, float_to_str(stepsequences[sc][l].steps[s], txt2));
-            }
+            stepSeqToXmlElement(&(stepsequences[sc][l]), p, l < n_lfos_voice );
 
-            p.SetAttribute("loop_start", stepsequences[sc][l].loop_start);
-            p.SetAttribute("loop_end", stepsequences[sc][l].loop_end);
-            p.SetAttribute("shuffle", float_to_str(stepsequences[sc][l].shuffle, txt2));
-            if (l < n_lfos_voice )
-            {
-               uint64_t ttm = stepsequences[sc][l].trigmask;
-
-               // collapse in case an old surge loads this
-               uint64_t old_ttm = ( ttm & 0xFFFF ) | ( ( ttm >> 16 ) & 0xFFFF ) | ( ( ttm >> 32 ) & 0xFFFF );
-               
-               p.SetAttribute("trigmask", old_ttm);
-
-               p.SetAttribute("trigmask_0to15", ttm & 0xFFFF );
-               ttm = ttm >> 16;
-               p.SetAttribute("trigmask_16to31", ttm & 0xFFFF );
-               ttm = ttm >> 16;
-               p.SetAttribute("trigmask_32to47", ttm & 0xFFFF );
-            }
             ss.InsertEndChild(p);
          }
       }
@@ -1952,32 +2125,18 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
    patch.InsertEndChild(ss);
 
    TiXmlElement mseg( "msegs" );
-   for (int sc = 0; sc < 2; sc++)
+   for (int sc = 0; sc < n_scenes; sc++)
    {
       for (int l = 0; l < n_lfos; l++)
       {
-         if (scene[sc].lfo[l].shape.val.i == ls_mseg)
+         if (scene[sc].lfo[l].shape.val.i == lt_mseg)
          {
             TiXmlElement p("mseg");
             p.SetAttribute("scene", sc);
             p.SetAttribute("i", l);
 
             auto *ms = &(msegs[sc][l]);
-            p.SetAttribute( "activeSegments", ms->n_activeSegments );
-
-            TiXmlElement segs( "segments" );
-            for( int s=0; s<ms->n_activeSegments; ++s )
-            {
-               TiXmlElement seg( "segment" );
-               seg.SetDoubleAttribute( "duration", ms->segments[s].duration );
-               seg.SetDoubleAttribute( "v0", ms->segments[s].v0 );
-               seg.SetDoubleAttribute( "cpduration", ms->segments[s].cpduration );
-               seg.SetDoubleAttribute( "cpv", ms->segments[s].cpv );
-               seg.SetAttribute( "type", (int)( ms->segments[s].type ));
-               segs.InsertEndChild( seg );
-            }
-            p.InsertEndChild(segs);
-            
+            msegToXMLElement(ms, p );
             mseg.InsertEndChild( p );
          }
       }
@@ -1991,9 +2150,7 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
       TiXmlElement p("entry");
       p.SetAttribute("i", l);
       p.SetAttribute("bipolar", scene[0].modsources[ms_ctrl1 + l]->is_bipolar() ? 1 : 0);
-      p.SetAttribute(
-          "v", float_to_str(
-                   ((ControllerModulationSource*)scene[0].modsources[ms_ctrl1 + l])->target, txt2));
+      p.SetAttribute("v", float_to_str(((ControllerModulationSource*)scene[0].modsources[ms_ctrl1 + l])->target, txt2));
       p.SetAttribute("label", CustomControllerLabel[l]);
 
       cc.InsertEndChild(p);
@@ -2003,23 +2160,31 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
    {
       char txt[256];
       TiXmlElement mw("modwheel");
-      mw.SetAttribute(
-          "s0", float_to_str(
-                    ((ControllerModulationSource*)scene[0].modsources[ms_modwheel])->target, txt));
-      mw.SetAttribute(
-          "s1", float_to_str(
-                    ((ControllerModulationSource*)scene[1].modsources[ms_modwheel])->target, txt));
+      for (int sc = 0; sc < n_scenes; sc++)
+      {
+         char str[32];
+         sprintf(str, "s%d", sc);
+         mw.SetAttribute(str, float_to_str(((ControllerModulationSource*)scene[sc].modsources[ms_modwheel])->target, txt));
+      }
       patch.InsertEndChild(mw);
+   }
+
+   {
+      TiXmlElement compat("compatability");
+
+      TiXmlElement comb( "correctlyTunedCombFilter" );
+      comb.SetAttribute( "v", correctlyTuneCombFilter ? 1 : 0 );
+      compat.InsertEndChild( comb );
+
+      patch.InsertEndChild(compat);
    }
 
    if( patchTuning.tuningStoredInPatch )
    {
        TiXmlElement pt( "patchTuning" );
-       pt.SetAttribute("v", base64_encode( (unsigned const char *)patchTuning.tuningContents.c_str(),
-                                            patchTuning.tuningContents.size() ).c_str() );
+       pt.SetAttribute("v", base64_encode( (unsigned const char *)patchTuning.tuningContents.c_str(), patchTuning.tuningContents.size() ).c_str() );
        if( patchTuning.mappingContents.size() > 0 )
-          pt.SetAttribute("m", base64_encode( (unsigned const char *)patchTuning.mappingContents.c_str(),
-                                              patchTuning.mappingContents.size() ).c_str() );
+          pt.SetAttribute("m", base64_encode( (unsigned const char *)patchTuning.mappingContents.c_str(), patchTuning.mappingContents.size() ).c_str() );
        
        patch.InsertEndChild(pt);
    }
@@ -2029,9 +2194,43 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
    
    if( dawExtraState.isPopulated )
    {
+      // This has a lecacy name since it was from before we moved into the editor object
        TiXmlElement izf("instanceZoomFactor");
-       izf.SetAttribute( "v", dawExtraState.instanceZoomFactor );
+       izf.SetAttribute( "v", dawExtraState.editor.instanceZoomFactor );
        dawExtraXML.InsertEndChild(izf);
+
+       TiXmlElement eds( "editor" );
+       eds.SetAttribute( "current_scene", dawExtraState.editor.current_scene );
+       eds.SetAttribute( "current_fx", dawExtraState.editor.current_fx );
+       eds.SetAttribute( "modsource", dawExtraState.editor.modsource );
+       eds.SetAttribute( "isMSEGOpen", dawExtraState.editor.isMSEGOpen );
+       for( int sc=0; sc<n_scenes; sc++ )
+       {
+          std::string con = "current_osc_" + std::to_string( sc );
+          eds.SetAttribute( con.c_str(), dawExtraState.editor.current_osc[sc]);
+          con = "modsource_editor_" + std::to_string( sc );
+          eds.SetAttribute( con.c_str(), dawExtraState.editor.modsource_editor[sc]);
+
+          if (dawExtraState.editor.msegStateIsPopulated)
+          {
+             for (int lf = 0; lf < n_lfos; ++lf)
+             {
+                auto q = &(dawExtraState.editor.msegEditState[sc][lf]);
+                std::string msns = "mseg_state_" + std::to_string(sc) + "_" + std::to_string(lf);
+                TiXmlElement mss(msns);
+                /*
+                 * We still write this from model to DAS even though we don't read it unless
+                 * that one user option is set
+                 */
+                mss.SetDoubleAttribute("hSnap", msegs[sc][lf].hSnap);
+                mss.SetDoubleAttribute("vSnap", msegs[sc][lf].vSnap);
+                mss.SetAttribute("timeEditMode", q->timeEditMode);
+                eds.InsertEndChild(mss);
+             }
+          }
+       }
+
+       dawExtraXML.InsertEndChild(eds);
 
        TiXmlElement mpe("mpeEnabled");
        mpe.SetAttribute("v", dawExtraState.mpeEnabled ? 1 : 0 );
@@ -2040,6 +2239,10 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
        TiXmlElement mppb("mpePitchBendRange");
        mppb.SetAttribute("v", dawExtraState.mpePitchBendRange );
        dawExtraXML.InsertEndChild(mppb);
+
+       TiXmlElement mpm("monoPedalMode");
+       mpm.SetAttribute("v", dawExtraState.monoPedalMode );
+       dawExtraXML.InsertEndChild(mpm);
 
        TiXmlElement tun("hasTuning");
        tun.SetAttribute("v", dawExtraState.hasTuning ? 1 : 0 );
@@ -2104,4 +2307,220 @@ unsigned int SurgePatch::save_xml(void** data) // allocates mem, must be freed b
    memcpy(d, s.data(), s.size());
    *data = d;
    return s.size();
+}
+
+void SurgePatch::msegToXMLElement(MSEGStorage* ms, TiXmlElement& p) const
+{
+   p.SetAttribute( "activeSegments", ms->n_activeSegments );
+   p.SetAttribute( "endpointMode", ms->endpointMode );
+   p.SetAttribute( "editMode", ms->editMode );
+   p.SetAttribute( "loopMode", ms->loopMode );
+   p.SetAttribute( "loopStart", ms->loop_start);
+   p.SetAttribute( "loopEnd", ms->loop_end );
+
+   p.SetDoubleAttribute("hSnapDefault", ms->hSnapDefault);
+   p.SetDoubleAttribute("vSnapDefault", ms->vSnapDefault);
+
+   p.SetDoubleAttribute("hSnap", ms->hSnap);
+   p.SetDoubleAttribute("vSnap", ms->vSnap);
+
+   p.SetDoubleAttribute("axisWidth", ms->axisWidth);
+   p.SetDoubleAttribute("axisStart", ms->axisStart);
+
+   TiXmlElement segs( "segments" );
+   for( int s=0; s<ms->n_activeSegments; ++s )
+   {
+      TiXmlElement seg( "segment" );
+      seg.SetDoubleAttribute( "duration", ms->segments[s].duration );
+      seg.SetDoubleAttribute( "v0", ms->segments[s].v0 );
+      seg.SetDoubleAttribute( "nv1", ms->segments[s].nv1 );
+      seg.SetDoubleAttribute( "cpduration", ms->segments[s].cpduration );
+      seg.SetDoubleAttribute( "cpv", ms->segments[s].cpv );
+      seg.SetAttribute( "type", (int)( ms->segments[s].type ));
+      seg.SetAttribute( "useDeform", (int)(ms->segments[s].useDeform));
+      seg.SetAttribute( "invertDeform", (int)(ms->segments[s].invertDeform));
+      segs.InsertEndChild( seg );
+   }
+   p.InsertEndChild(segs);
+}
+
+void SurgePatch::msegFromXMLElement(MSEGStorage* ms, TiXmlElement* p, bool restoreMSEGSnap) const
+{
+   int v;
+   ms->n_activeSegments = 0;
+   if( p->QueryIntAttribute( "activeSegments", &v ) == TIXML_SUCCESS ) ms->n_activeSegments = v;
+   if( p->QueryIntAttribute("endpointMode", &v) == TIXML_SUCCESS )
+      ms->endpointMode = (MSEGStorage::EndpointMode)v;
+   else
+      ms->endpointMode = MSEGStorage::EndpointMode::FREE;
+   if( p->QueryIntAttribute( "editMode", &v ) == TIXML_SUCCESS )
+      ms->editMode = (MSEGStorage::EditMode)v;
+   else
+      ms->editMode = MSEGStorage::ENVELOPE;
+
+   if( p->QueryIntAttribute( "loopMode", &v ) == TIXML_SUCCESS )
+      ms->loopMode = (MSEGStorage::LoopMode)v;
+   else
+      ms->loopMode = MSEGStorage::LoopMode::LOOP;
+   if( p->QueryIntAttribute( "loopStart", &v ) == TIXML_SUCCESS )
+      ms->loop_start = v;
+   else
+      ms->loop_start = -1;
+
+   if( p->QueryIntAttribute( "loopEnd", &v ) == TIXML_SUCCESS )
+      ms->loop_end = v;
+   else
+      ms->loop_end = -1;
+
+   double dv;
+   if (p->QueryDoubleAttribute("hSnapDefault", &dv) == TIXML_SUCCESS)
+      ms->hSnapDefault = dv;
+   else
+      ms->hSnapDefault = MSEGStorage::defaultHSnapDefault;
+
+   if (p->QueryDoubleAttribute("vSnapDefault", &dv) == TIXML_SUCCESS)
+      ms->vSnapDefault = dv;
+   else
+      ms->vSnapDefault = MSEGStorage::defaultVSnapDefault;
+
+   if( restoreMSEGSnap )
+   {
+      if (p->QueryDoubleAttribute("hSnap", &dv) == TIXML_SUCCESS)
+         ms->hSnap = dv;
+      else
+         ms->hSnap = 0;
+
+      if (p->QueryDoubleAttribute("vSnap", &dv) == TIXML_SUCCESS)
+         ms->vSnap = dv;
+      else
+         ms->vSnap = 0;
+   }
+
+   if (p->QueryDoubleAttribute("axisStart", &dv) == TIXML_SUCCESS)
+      ms->axisStart = dv;
+   else
+      ms->axisStart = -1;
+
+   if (p->QueryDoubleAttribute("axisWidth", &dv) == TIXML_SUCCESS)
+      ms->axisWidth = dv;
+   else
+      ms->axisWidth = -1;
+
+
+   auto segs = TINYXML_SAFE_TO_ELEMENT(p->FirstChild( "segments" ));
+   if( segs )
+   {
+      auto seg = TINYXML_SAFE_TO_ELEMENT(segs->FirstChild( "segment" ) );
+      int idx = 0;
+      while( seg )
+      {
+         double d;
+#define MSGF(x) if( seg->QueryDoubleAttribute( #x, &d ) == TIXML_SUCCESS ) ms->segments[idx].x = d;
+         MSGF( duration );
+         MSGF( v0 );
+         MSGF( cpduration );
+         MSGF( cpv );
+         MSGF( nv1 );
+
+         int t = 0;
+         if( seg->QueryIntAttribute( "type", &v ) == TIXML_SUCCESS ) t = v;
+         ms->segments[idx].type = (MSEGStorage::segment::Type)t;
+
+         if( seg->QueryIntAttribute( "useDeform", &v) == TIXML_SUCCESS )
+            ms->segments[idx].useDeform = v;
+         else
+            ms->segments[idx].useDeform = true;
+
+         if( seg->QueryIntAttribute( "invertDeform", &v) == TIXML_SUCCESS )
+            ms->segments[idx].invertDeform = v;
+         else
+            ms->segments[idx].invertDeform = false;
+
+         seg = TINYXML_SAFE_TO_ELEMENT( seg->NextSibling( "segment" ) );
+
+         idx++;
+      }
+      if( idx != ms->n_activeSegments )
+      {
+         std::cout << "BAD RESTORE " << _D(idx) << _D(ms->n_activeSegments) << std::endl;
+      }
+   }
+   // Rebuild cache
+   Surge::MSEG::rebuildCache(ms);
+
+}
+
+void SurgePatch::stepSeqToXmlElement(StepSequencerStorage* ss, TiXmlElement& p, bool streamMask) const
+{
+   char txt[256], txt2[256];
+   for (int s = 0; s < n_stepseqsteps; s++)
+   {
+      sprintf(txt, "s%i", s);
+      if (ss->steps[s] != 0.f)
+         p.SetAttribute(txt, float_to_str(ss->steps[s], txt2));
+   }
+
+   p.SetAttribute("loop_start", ss->loop_start);
+   p.SetAttribute("loop_end", ss->loop_end);
+   p.SetAttribute("shuffle", float_to_str(ss->shuffle, txt2));
+   if(streamMask)
+   {
+      uint64_t ttm = ss->trigmask;
+
+      // collapse in case an old surge loads this
+      uint64_t old_ttm = ( ttm & 0xFFFF ) | ( ( ttm >> 16 ) & 0xFFFF ) | ( ( ttm >> 32 ) & 0xFFFF );
+
+      p.SetAttribute("trigmask", old_ttm);
+
+      p.SetAttribute("trigmask_0to15", ttm & 0xFFFF );
+      ttm = ttm >> 16;
+      p.SetAttribute("trigmask_16to31", ttm & 0xFFFF );
+      ttm = ttm >> 16;
+      p.SetAttribute("trigmask_32to47", ttm & 0xFFFF );
+   }
+}
+
+void SurgePatch::stepSeqFromXmlElement(StepSequencerStorage* ss, TiXmlElement* p) const
+{
+   double d;
+   int j;
+   if (p->QueryDoubleAttribute("shuffle", &d) == TIXML_SUCCESS)
+      ss->shuffle = (float)d;
+   if (p->QueryIntAttribute("loop_start", &j) == TIXML_SUCCESS)
+      ss->loop_start = j;
+   if (p->QueryIntAttribute("loop_end", &j) == TIXML_SUCCESS)
+      ss->loop_end = j;
+   if (p->QueryIntAttribute("trigmask", &j) == TIXML_SUCCESS)
+      ss->trigmask = j;
+
+   if (p->QueryIntAttribute("trigmask_0to15", &j ) == TIXML_SUCCESS )
+   {
+      ss->trigmask &= 0xFFFFFFFFFFFF0000;
+      j &= 0xFFFF;
+      ss->trigmask |= j;
+   };
+   if (p->QueryIntAttribute("trigmask_16to31", &j ) == TIXML_SUCCESS )
+   {
+      ss->trigmask &= 0xFFFFFFFF0000FFFF;
+      j &= 0xFFFF;
+      uint64_t jl = (uint64_t)j;
+      ss->trigmask |= jl << 16;
+   };
+   if (p->QueryIntAttribute("trigmask_32to47", &j ) == TIXML_SUCCESS )
+   {
+      ss->trigmask &= 0xFFFF0000FFFFFFFF;
+      j &= 0xFFFF;
+      uint64_t jl = (uint64_t)j;
+      ss->trigmask |= jl << 32;
+   };
+
+   for (int s = 0; s < n_stepseqsteps; s++)
+   {
+      char txt[256];
+      sprintf(txt, "s%i", s);
+      if (p->QueryDoubleAttribute(txt, &d) == TIXML_SUCCESS)
+         ss->steps[s] = (float)d;
+      else
+         ss->steps[s] = 0.f;
+   }
 }

@@ -15,17 +15,10 @@
 
 #include "AudioInputOscillator.h"
 
-/* audio input osc */
-
-/* add controls:
-input L/R
-gain
-limiter?
-*/
-
 AudioInputOscillator::AudioInputOscillator(SurgeStorage* storage, OscillatorStorage* oscdata, pdata* localcopy)
     : Oscillator(storage, oscdata, localcopy), lp(storage), hp(storage)
 {
+   // in case of more scenes being added, design a solution for audio in oscillator extra input!
    isInSceneB = false;
    if( storage )
    {
@@ -44,8 +37,8 @@ void AudioInputOscillator::init(float pitch, bool is_display)
    hp.coeff_instantize();
    lp.coeff_instantize();
 
-   hp.coeff_HP(hp.calc_omega(oscdata->p[5].val.f / 12.0) / OSC_OVERSAMPLING, 0.707);
-   lp.coeff_LP2B(lp.calc_omega(oscdata->p[6].val.f / 12.0) / OSC_OVERSAMPLING, 0.707);
+   hp.coeff_HP(hp.calc_omega(oscdata->p[audioin_lowcut].val.f / 12.0) / OSC_OVERSAMPLING, 0.707);
+   lp.coeff_LP2B(lp.calc_omega(oscdata->p[audioin_highcut].val.f / 12.0) / OSC_OVERSAMPLING, 0.707);
 }
 
 AudioInputOscillator::~AudioInputOscillator()
@@ -56,54 +49,55 @@ AudioInputOscillator::~AudioInputOscillator()
 
 void AudioInputOscillator::init_ctrltypes(int scene, int osc)
 {
-   oscdata->p[0].set_name("Audio In L/R Channel");
-   oscdata->p[0].set_type(ct_percent_bidirectional_stereo);
-   oscdata->p[1].set_name("Audio In Gain");
-   oscdata->p[1].set_type(ct_decibel);
-   if( scene == 1 )
+   oscdata->p[audioin_channel].set_name("Audio In Channel");
+   oscdata->p[audioin_channel].set_type(ct_percent_bidirectional_stereo);
+   oscdata->p[audioin_gain].set_name("Audio In Gain");
+   oscdata->p[audioin_gain].set_type(ct_decibel);
+   if (scene == 1)
    {
-      oscdata->p[2].set_name("Scene A L/R Channel");
-      oscdata->p[2].set_type(ct_percent_bidirectional_stereo);
-      oscdata->p[3].set_name("Scene A Gain");
-      oscdata->p[3].set_type(ct_decibel);
-      oscdata->p[4].set_name("Audio In<>Scene A Mix");
-      oscdata->p[4].set_type(ct_percent);
+      oscdata->p[audioin_sceneAchan].set_name("Scene A Channel");
+      oscdata->p[audioin_sceneAchan].set_type(ct_percent_bidirectional_stereo);
+      oscdata->p[audioin_sceneAgain].set_name("Scene A Gain");
+      oscdata->p[audioin_sceneAgain].set_type(ct_decibel);
+      oscdata->p[audioin_sceneAmix].set_name("Scene A Mix");
+      oscdata->p[audioin_sceneAmix].set_type(ct_percent);
    }
-   oscdata->p[5].set_name("Low Cut");
-   oscdata->p[5].set_type(ct_freq_audible_deactivatable);
-   oscdata->p[6].set_name("High Cut");
-   oscdata->p[6].set_type(ct_freq_audible_deactivatable);
+   oscdata->p[audioin_lowcut].set_name("Low Cut");
+   oscdata->p[audioin_lowcut].set_type(ct_freq_audible_deactivatable);
+   oscdata->p[audioin_highcut].set_name("High Cut");
+   oscdata->p[audioin_highcut].set_type(ct_freq_audible_deactivatable);
 }
 
 void AudioInputOscillator::init_default_values()
 {
-   oscdata->p[0].val.f = 0.0f;
-   oscdata->p[1].val.f = 0.0f;
-   if( isInSceneB )
+   oscdata->p[audioin_channel].val.f = 0.0f;
+   oscdata->p[audioin_gain].val.f = 0.0f;
+   if (isInSceneB)
    {
-      oscdata->p[2].val.f = 0.0f;
-      oscdata->p[3].val.f = 0.0f;
-      oscdata->p[4].val.f = 0.0f;
+      oscdata->p[audioin_sceneAchan].val.f = 0.0f;
+      oscdata->p[audioin_sceneAgain].val.f = 0.0f;
+      oscdata->p[audioin_sceneAmix].val.f = 0.0f;
    }
-   oscdata->p[5].val.f = oscdata->p[5].val_min.f; // high cut at the bottom
-   oscdata->p[5].deactivated = true;
-   oscdata->p[6].val.f = oscdata->p[6].val_max.f; // low cut at the top
-   oscdata->p[6].deactivated = true;
+   oscdata->p[audioin_lowcut].val.f = oscdata->p[audioin_lowcut].val_min.f; // high cut at the bottom
+   oscdata->p[audioin_lowcut].deactivated = true;
+   oscdata->p[audioin_highcut].val.f = oscdata->p[audioin_highcut].val_max.f; // low cut at the top
+   oscdata->p[audioin_highcut].deactivated = true;
 }
 
-void AudioInputOscillator::process_block(float pitch, float drift, bool stereo, bool FM, float FMdepth)
+void AudioInputOscillator::process_block(
+    float pitch, float drift, bool stereo, bool FM, float FMdepth)
 {
    bool useOtherScene = false;
-   if( isInSceneB && localcopy[oscdata->p[4].param_id_in_scene].f > 0.f )
+   if (isInSceneB && localcopy[oscdata->p[audioin_sceneAmix].param_id_in_scene].f > 0.f)
    {
       useOtherScene = true;
    }
 
-   float inGain = db_to_linear(localcopy[oscdata->p[1].param_id_in_scene].f);
-   float inChMix = limit_range(localcopy[oscdata->p[0].param_id_in_scene].f, -1.f, 1.f);
-   float sceneGain = db_to_linear(localcopy[oscdata->p[3].param_id_in_scene].f);
-   float sceneChMix = limit_range(localcopy[oscdata->p[2].param_id_in_scene].f, -1.f, 1.f);
-   float sceneMix = localcopy[oscdata->p[4].param_id_in_scene].f;
+   float inGain = db_to_linear(localcopy[oscdata->p[audioin_gain].param_id_in_scene].f);
+   float inChMix = limit_range(localcopy[oscdata->p[audioin_channel].param_id_in_scene].f, -1.f, 1.f);
+   float sceneGain = db_to_linear(localcopy[oscdata->p[audioin_sceneAgain].param_id_in_scene].f);
+   float sceneChMix = limit_range(localcopy[oscdata->p[audioin_sceneAchan].param_id_in_scene].f, -1.f, 1.f);
+   float sceneMix = localcopy[oscdata->p[audioin_sceneAmix].param_id_in_scene].f;
    float inverseMix = 1.f - sceneMix;
 
    float l = inGain * (1.f - inChMix);
@@ -150,16 +144,25 @@ void AudioInputOscillator::process_block(float pitch, float drift, bool stereo, 
 
 void AudioInputOscillator::applyFilter()
 {
-   if (!oscdata->p[5].deactivated)
-      hp.coeff_HP(hp.calc_omega(localcopy[oscdata->p[5].param_id_in_scene].f / 12.0) / OSC_OVERSAMPLING, 0.707);
-   if (!oscdata->p[6].deactivated)
-      lp.coeff_LP2B(lp.calc_omega(localcopy[oscdata->p[6].param_id_in_scene].f / 12.0) / OSC_OVERSAMPLING, 0.707);
+   if (!oscdata->p[audioin_lowcut].deactivated)
+   {
+      auto par = &(oscdata->p[audioin_lowcut]);
+      auto pv = limit_range(localcopy[par->param_id_in_scene].f, par->val_min.f, par->val_max.f);
+      hp.coeff_HP(hp.calc_omega(pv / 12.0) / OSC_OVERSAMPLING, 0.707);
+   }
+
+   if (!oscdata->p[audioin_highcut].deactivated)
+   {
+      auto par = &(oscdata->p[audioin_highcut]);
+      auto pv = limit_range(localcopy[par->param_id_in_scene].f, par->val_min.f, par->val_max.f);
+      lp.coeff_LP2B(lp.calc_omega(pv / 12.0) / OSC_OVERSAMPLING, 0.707);
+   }
 
    for (int k = 0; k < BLOCK_SIZE_OS; k += BLOCK_SIZE)
    {
-      if (!oscdata->p[5].deactivated)
+      if (!oscdata->p[audioin_lowcut].deactivated)
          hp.process_block(&(output[k]), &(outputR[k]));
-      if (!oscdata->p[6].deactivated)
+      if (!oscdata->p[audioin_highcut].deactivated)
          lp.process_block(&(output[k]), &(outputR[k]));
    }
 }
@@ -168,10 +171,10 @@ void AudioInputOscillator::handleStreamingMismatches(int streamingRevision, int 
 {
    if (streamingRevision <= 12)
    {
-      oscdata->p[5].val.f = oscdata->p[5].val_min.f; // high cut at the bottom
-      oscdata->p[5].deactivated = true;
-      oscdata->p[6].val.f = oscdata->p[6].val_max.f; // low cut at the top
-      oscdata->p[6].deactivated = true;
+      oscdata->p[audioin_lowcut].val.f = oscdata->p[audioin_lowcut].val_min.f; // high cut at the bottom
+      oscdata->p[audioin_lowcut].deactivated = true;
+      oscdata->p[audioin_highcut].val.f = oscdata->p[audioin_highcut].val_max.f; // low cut at the top
+      oscdata->p[audioin_highcut].deactivated = true;
    }
 }
 

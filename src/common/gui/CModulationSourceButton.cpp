@@ -1,6 +1,5 @@
 #include "CModulationSourceButton.h"
 #include "CSurgeSlider.h"
-#include "Colors.h"
 #include "MouseCursorControl.h"
 #include "globals.h"
 #include "ModulationSource.h"
@@ -37,7 +36,8 @@ CModulationSourceButton::CModulationSourceButton(const CRect& size,
                                                  int msid,
                                                  std::shared_ptr<SurgeBitmaps> bitmapStore,
                                                  SurgeStorage* storage)
-    : CCursorHidingControl(size, listener, tag, 0), OldValue(0.f)
+    : CControl(size, listener, tag, 0), OldValue(0.f),
+      Surge::UI::CursorControlAdapterWithMouseDelta<CModulationSourceButton>(storage)
 {
    this->state = state;
    this->msid = msid;
@@ -53,7 +53,8 @@ CModulationSourceButton::CModulationSourceButton(const CRect& size,
    controlstate = cs_none;
    label[0] = 0;
    blink = 0;
-   bmp = bitmapStore->getBitmap(IDB_MODSRC_BG);
+   bmp = bitmapStore->getBitmap(IDB_MODSOURCE_BG);
+   arrow = bitmapStore->getBitmap(IDB_MODSOURCE_SHOW_LFO);
    this->storage = nullptr;
 }
 
@@ -116,12 +117,6 @@ void CModulationSourceButton::draw(CDrawContext* dc)
       auto priorDrawMode = dc->getDrawMode();
       dc->setDrawMode(kAntiAliasing | kNonIntegralMode);
    #endif
-
-   const CColor ColHover = CColor(103, 167, 253, 255);
-   const CColor ColEdge = CColor(46, 134, 254, 255);
-   const CColor ColTint = CColor(46, 134, 254, 255);
-   const CColor ColSemiTint = CColor(32, 93, 176, 255);
-   const CColor ColBlink = CColor(173, 255, 107, 255);
 
    /*
         state
@@ -230,15 +225,17 @@ void CModulationSourceButton::draw(CDrawContext* dc)
       dc->drawRect(MCRect, kDrawFilled);
       CRect brect(MCRect);
       brect.inset(1, 1);
-      dc->setFillColor(ColSemiTint);
+      dc->setFillColor(skin->getColor(Colors::ModSource::Macro::Background));
       dc->drawRect(brect, kDrawFilled);
 
       int midx = brect.left + ((brect.getWidth() - 1) * 0.5);
       int barx = brect.left + (value * (float)brect.getWidth());
 
+      lastBarDraw = CPoint( barx, (brect.top + brect.bottom) * 0.5);
+
       if (bipolar)
       {
-         dc->setFillColor(ColTint);
+         dc->setFillColor(skin->getColor(Colors::ModSource::Macro::Fill));
          CRect bar(brect);
 
          if (barx >= midx)
@@ -259,7 +256,7 @@ void CModulationSourceButton::draw(CDrawContext* dc)
          CRect vr(brect);
          vr.right = barx + 1;
          vr.bound(brect);
-         dc->setFillColor(ColTint);
+         dc->setFillColor(skin->getColor(Colors::ModSource::Macro::Fill));
          if (vr.right > vr.left)
             dc->drawRect(vr, kDrawFilled);
       }
@@ -270,13 +267,14 @@ void CModulationSourceButton::draw(CDrawContext* dc)
    // show LFO parameters arrow
    if (msid >= ms_lfo1 && msid <= ms_slfo6)
    {
+      CRect arwsze = sze;
+      arwsze.left = sze.right - 14;
+      arwsze.setWidth(14);
+      arwsze.setHeight(16);
       CPoint where;
-      where.x = - 9;
-      if (state >= 4)
-         where.y = 8 * rh;
-      else
-         where.y = 7 * rh;
-      bmp->draw(dc, sze, where, 0xff);
+      where.y = state >= 4 ? rh : 0;
+
+      arrow->draw(dc, arwsze, where, 0xff);
    }
 
    #if WINDOWS
@@ -290,10 +288,10 @@ void CModulationSourceButton::draw(CDrawContext* dc)
 
 CMouseEventResult CModulationSourceButton::onMouseDown(CPoint& where, const CButtonState& buttons)
 {
+   hasMovedBar = false;
+
    if (storage)
       this->hideCursor = Surge::Storage::getUserDefaultValue(storage, "showCursorWhileEditing", 0);
-
-   super::onMouseDown(where, buttons);
 
    if (!getMouseEnabled())
       return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
@@ -317,6 +315,9 @@ CMouseEventResult CModulationSourceButton::onMouseDown(CPoint& where, const CBut
          return kMouseDownEventHandledButDontNeedMovedOrUpEvents;
    }
 
+
+   onMouseDownCursorHelper(where);
+
    if (is_metacontroller && (buttons & kDoubleClick) && MCRect.pointInside(where) && controlstate == cs_none )
    {
       if (bipolar)
@@ -336,7 +337,7 @@ CMouseEventResult CModulationSourceButton::onMouseDown(CPoint& where, const CBut
       beginEdit();
       controlstate = cs_drag;
 
-      detachCursor(where);
+      enqueueCursorHideIfMoved(where);
 
       return kMouseEventHandled;
    }
@@ -361,7 +362,7 @@ CMouseEventResult CModulationSourceButton::onMouseDown(CPoint& where, const CBut
 
 CMouseEventResult CModulationSourceButton::onMouseUp(CPoint& where, const CButtonState& buttons)
 {
-   super::onMouseUp(where, buttons);
+   unenqueueCursorHideIfMoved();
 
    if( controlstate == cs_swap && dragLabel )
    {
@@ -411,7 +412,7 @@ CMouseEventResult CModulationSourceButton::onMouseUp(CPoint& where, const CButto
       CPoint loc(where);
       loc.offset(-size.left, -size.top);
 
-      click_is_editpart = loc.x > (size.getWidth() - 11);   // click area for show LFO parameters arrow
+      click_is_editpart = loc.x >= (size.getWidth() - 14);   // click area for show LFO parameters arrow
       event_is_drag = false;
       if (listener)
          listener->valueChanged(this);
@@ -422,7 +423,10 @@ CMouseEventResult CModulationSourceButton::onMouseUp(CPoint& where, const CButto
    {
       endEdit();
 
-      attachCursor();
+      if( hasMovedBar )
+         endCursorHide(lastBarDraw);
+      else
+         endCursorHide();
    }
    controlstate = cs_none;
 
@@ -439,7 +443,7 @@ CMouseEventResult CModulationSourceButton::onMouseMoved( CPoint &where, const CB
       thresh = sqrt(thresh);
       if (thresh < 3)
       {
-         return CCursorHidingControl::onMouseMoved(where, buttons);
+         onMouseMovedCursorHelper(where, buttons);
       }
       if( dragLabel == nullptr )
       {
@@ -455,7 +459,6 @@ CMouseEventResult CModulationSourceButton::onMouseMoved( CPoint &where, const CB
          l->setTransparency(false);
 
          CColor FrameCol, FillCol, FontCol;
-         const CColor ColEdge = CColor(46, 134, 254, 255);
 
          FillCol = skin->getColor(Colors::ModSource::Used::Background);
          FrameCol = skin->getColor( Colors::ModSource::Used::Border );
@@ -486,19 +489,21 @@ CMouseEventResult CModulationSourceButton::onMouseMoved( CPoint &where, const CB
    }
    else
    {
-      return CCursorHidingControl::onMouseMoved( where, buttons );
+      return onMouseMovedCursorHelper(where, buttons );
    }
 }
 
 //------------------------------------------------------------------------------------------------
 
-void CModulationSourceButton::onMouseMoveDelta(CPoint& where,
+void CModulationSourceButton::onMouseMoveDelta(const CPoint& where,
                                                const CButtonState& buttons,
                                                double dx,
                                                double dy)
 {
    if ((controlstate == cs_drag) && (buttons & kLButton))
    {
+      hasMovedBar = true;
+
       value += dx / (double)(getWidth());
       value = limit_range(value, 0.f, 1.f);
       event_is_drag = true;
@@ -508,7 +513,7 @@ void CModulationSourceButton::onMouseMoveDelta(CPoint& where,
    }
 }
 
-double CModulationSourceButton::getMouseDeltaScaling(CPoint& where, const CButtonState& buttons)
+double CModulationSourceButton::getMouseDeltaScaling(const CPoint& where, const CButtonState& buttons)
 {
    double scaling = 0.25f;
 

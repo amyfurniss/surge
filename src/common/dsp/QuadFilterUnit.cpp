@@ -1,10 +1,15 @@
 #include "QuadFilterUnit.h"
 #include "SurgeStorage.h"
 #include <vt_dsp/basic_dsp.h>
+#include <iostream>
 #include "DebugHelpers.h"
 
 #include "filters/VintageLadders.h"
 #include "filters/Obxd.h"
+#include "filters/K35.h"
+#include "filters/DiodeLadder.h"
+#include "filters/NonlinearFeedback.h"
+#include "filters/NonlinearStates.h"
 
 __m128 SVFLP12Aquad(QuadFilterUnitState* __restrict f, __m128 in)
 {
@@ -646,22 +651,21 @@ __m128 SINUS_SSE2(__m128 in, __m128 drive)
    _mm_store_si128((__m128i*)&e4, e);
 #endif
 
-   __m128 ws1 = _mm_load_ss(&waveshapers[3][e4[0] & 0x3ff]);
-   __m128 ws2 = _mm_load_ss(&waveshapers[3][e4[1] & 0x3ff]);
-   __m128 ws3 = _mm_load_ss(&waveshapers[3][e4[2] & 0x3ff]);
-   __m128 ws4 = _mm_load_ss(&waveshapers[3][e4[3] & 0x3ff]);
+   __m128 ws1 = _mm_load_ss(&waveshapers[wst_sine][e4[0] & 0x3ff]);
+   __m128 ws2 = _mm_load_ss(&waveshapers[wst_sine][e4[1] & 0x3ff]);
+   __m128 ws3 = _mm_load_ss(&waveshapers[wst_sine][e4[2] & 0x3ff]);
+   __m128 ws4 = _mm_load_ss(&waveshapers[wst_sine][e4[3] & 0x3ff]);
    __m128 ws = _mm_movelh_ps(_mm_unpacklo_ps(ws1, ws2), _mm_unpacklo_ps(ws3, ws4));
-   ws1 = _mm_load_ss(&waveshapers[3][(e4[0] + 1) & 0x3ff]);
-   ws2 = _mm_load_ss(&waveshapers[3][(e4[1] + 1) & 0x3ff]);
-   ws3 = _mm_load_ss(&waveshapers[3][(e4[2] + 1) & 0x3ff]);
-   ws4 = _mm_load_ss(&waveshapers[3][(e4[3] + 1) & 0x3ff]);
+   ws1 = _mm_load_ss(&waveshapers[wst_sine][(e4[0] + 1) & 0x3ff]);
+   ws2 = _mm_load_ss(&waveshapers[wst_sine][(e4[1] + 1) & 0x3ff]);
+   ws3 = _mm_load_ss(&waveshapers[wst_sine][(e4[2] + 1) & 0x3ff]);
+   ws4 = _mm_load_ss(&waveshapers[wst_sine][(e4[3] + 1) & 0x3ff]);
    __m128 wsn = _mm_movelh_ps(_mm_unpacklo_ps(ws1, ws2), _mm_unpacklo_ps(ws3, ws4));
 
    x = _mm_add_ps(_mm_mul_ps(_mm_sub_ps(one, a), ws), _mm_mul_ps(a, wsn));
 
    return x;
 }
-
 
 __m128 ASYM_SSE2(__m128 in, __m128 drive)
 {
@@ -692,15 +696,15 @@ __m128 ASYM_SSE2(__m128 in, __m128 drive)
    _mm_store_si128((__m128i*)&e4, e);
 #endif
 
-   __m128 ws1 = _mm_load_ss(&waveshapers[2][e4[0] & 0x3ff]);
-   __m128 ws2 = _mm_load_ss(&waveshapers[2][e4[1] & 0x3ff]);
-   __m128 ws3 = _mm_load_ss(&waveshapers[2][e4[2] & 0x3ff]);
-   __m128 ws4 = _mm_load_ss(&waveshapers[2][e4[3] & 0x3ff]);
+   __m128 ws1 = _mm_load_ss(&waveshapers[wst_asym][e4[0] & 0x3ff]);
+   __m128 ws2 = _mm_load_ss(&waveshapers[wst_asym][e4[1] & 0x3ff]);
+   __m128 ws3 = _mm_load_ss(&waveshapers[wst_asym][e4[2] & 0x3ff]);
+   __m128 ws4 = _mm_load_ss(&waveshapers[wst_asym][e4[3] & 0x3ff]);
    __m128 ws = _mm_movelh_ps(_mm_unpacklo_ps(ws1, ws2), _mm_unpacklo_ps(ws3, ws4));
-   ws1 = _mm_load_ss(&waveshapers[2][(e4[0] + 1) & 0x3ff]);
-   ws2 = _mm_load_ss(&waveshapers[2][(e4[1] + 1) & 0x3ff]);
-   ws3 = _mm_load_ss(&waveshapers[2][(e4[2] + 1) & 0x3ff]);
-   ws4 = _mm_load_ss(&waveshapers[2][(e4[3] + 1) & 0x3ff]);
+   ws1 = _mm_load_ss(&waveshapers[wst_asym][(e4[0] + 1) & 0x3ff]);
+   ws2 = _mm_load_ss(&waveshapers[wst_asym][(e4[1] + 1) & 0x3ff]);
+   ws3 = _mm_load_ss(&waveshapers[wst_asym][(e4[2] + 1) & 0x3ff]);
+   ws4 = _mm_load_ss(&waveshapers[wst_asym][(e4[3] + 1) & 0x3ff]);
    __m128 wsn = _mm_movelh_ps(_mm_unpacklo_ps(ws1, ws2), _mm_unpacklo_ps(ws3, ws4));
 
    x = _mm_add_ps(_mm_mul_ps(_mm_sub_ps(one, a), ws), _mm_mul_ps(a, wsn));
@@ -710,7 +714,10 @@ __m128 ASYM_SSE2(__m128 in, __m128 drive)
 
 FilterUnitQFPtr GetQFPtrFilterUnit(int type, int subtype)
 {
-   switch (type)
+   // Force compiler to error out if I miss one
+   fu_type fType = (fu_type)type;
+
+   switch (fType)
    {
    case fut_lp12:
    {
@@ -732,8 +739,7 @@ FilterUnitQFPtr GetQFPtrFilterUnit(int type, int subtype)
       //				return IIR12CFLquad;
       return IIR12Bquad;
    }
-   case fut_bp12:
-   {
+   case fut_bp12: {
       switch (subtype)
       {
       case st_SVF:
@@ -745,22 +751,29 @@ FilterUnitQFPtr GetQFPtrFilterUnit(int type, int subtype)
       case st_Smooth:
          return IIR12Bquad;
          break;
-      case st_SVFBP24:
+      }
+      break;
+   }
+   case fut_bp24:{
+      switch( subtype )
+      {
+      case st_SVF:
          return SVFBP24Aquad;
          break;
-      case st_RoughBP24:
+      case st_Rough:
          return IIR24CFCquad;
          break;
-      case st_SmoothBP24:
+      case st_Smooth:
          return IIR24Bquad;
          break;
       }
    }
-   case fut_br12:
-      if (subtype == st_BR12 || subtype == st_BR12Mild)
-         return IIR12Bquad;
-      else
-         return IIR24Bquad;
+   case fut_notch12:
+      return IIR12Bquad;
+   case fut_notch24:
+      return IIR24Bquad;
+   case fut_apf:
+      return IIR12Bquad;
    case fut_lp24:
       if (subtype == st_SVF)
          return SVFLP24Aquad;
@@ -781,7 +794,8 @@ FilterUnitQFPtr GetQFPtrFilterUnit(int type, int subtype)
       return LPMOOGquad;
    case fut_SNH:
       return SNHquad;
-   case fut_comb:
+   case fut_comb_pos:
+   case fut_comb_neg:
       return COMBquad_SSE2;
    case fut_vintageladder:
       switch( subtype )
@@ -794,18 +808,42 @@ FilterUnitQFPtr GetQFPtrFilterUnit(int type, int subtype)
          return VintageLadder::Huov::process;
       }
       break;
-   case fut_obxd_2pole:
+   case fut_obxd_2pole_lp:
+   case fut_obxd_2pole_hp:
+   case fut_obxd_2pole_bp:
+   case fut_obxd_2pole_n:
+      // All the differences are in subtype wrangling int he coefficnent maker
       return ObxdFilter::process_2_pole;
       break;
    case fut_obxd_4pole:
       return ObxdFilter::process_4_pole;
       break;
-   default:
-      // SOFTWARE ERROR
+   case fut_k35_lp:
+      return K35Filter::process_lp;
       break;
-         
-#if SURGE_EXTRA_FILTERS      
-#endif      
+   case fut_k35_hp:
+      return K35Filter::process_hp;
+      break;
+   case fut_diode:
+      return DiodeLadderFilter::process;
+      break;
+   case fut_cutoffwarp_lp:
+   case fut_cutoffwarp_hp:
+   case fut_cutoffwarp_n:
+   case fut_cutoffwarp_bp:
+   case fut_cutoffwarp_ap:
+      return NonlinearFeedbackFilter::process;
+      break;
+   case fut_resonancewarp_lp:
+   case fut_resonancewarp_hp:
+   case fut_resonancewarp_n:
+   case fut_resonancewarp_bp:
+   case fut_resonancewarp_ap:
+      return NonlinearStatesFilter::process;
+      break;
+   case fut_none:
+   case n_fu_types:
+      return 0;
    }
    return 0;
 }
@@ -814,16 +852,16 @@ WaveshaperQFPtr GetQFPtrWaveshaper(int type)
 {
    switch (type)
    {
-   case wst_digi:
-      return DIGI_SSE2;
+   case wst_soft:
+      return TANH;
    case wst_hard:
       return CLIP;
-   case wst_sinus:
-      return SINUS_SSE2;
    case wst_asym:
       return ASYM_SSE2;
-   case wst_tanh:
-      return TANH;
+   case wst_sine:
+      return SINUS_SSE2;
+   case wst_digital:
+      return DIGI_SSE2;
    }
    return 0;
 }

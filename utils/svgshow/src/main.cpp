@@ -1,8 +1,6 @@
 #include <iostream>
 #include <iomanip>
 
-#include "ImportFilesystem.h"
-
 #if MAC
 #include "cocoa_minimal_main.h"
 #endif
@@ -27,7 +25,10 @@ struct SvgBrowser : public VSTGUI::IKeyboardHook
       SurgeSVGRenderComponent(const VSTGUI::CRect &size, VSTGUI::CFrame *f, VSTGUI::CTextLabel *ll ) : VSTGUI::CControl(size), frame(f)
          {
             l = ll;
-            csb = nullptr;
+
+            std::string defload =  "/Users/paul/Desktop/SVG3031/single_transp.svg";
+
+            csb = new CScalableBitmap( defload, f );
             /* if( l )
                l->remeber(); */
          }

@@ -61,6 +61,7 @@ enum ctrltypes
    ct_decibel_attenuation_large,
    ct_decibel_fmdepth,
    ct_decibel_extendable,
+   ct_decibel_deactivatable,
    ct_freq_audible,
    ct_freq_audible_deactivatable,
    ct_freq_mod,
@@ -80,7 +81,8 @@ enum ctrltypes
    ct_portatime,
    ct_lforate,
    ct_lforate_deactivatable,
-   ct_lfoshape,
+   ct_lfodeform,
+   ct_lfotype,
    ct_lfotrigmode,
    ct_detuning,
    ct_osctype,
@@ -132,10 +134,12 @@ enum ctrltypes
    ct_phaser_stages,
    ct_lfoamplitude,
    ct_vocoder_modulator_mode,
-   ct_airwindow_fx,
-   ct_airwindow_param,
-   ct_airwindow_param_bipolar,
-   ct_airwindow_param_integral,
+   ct_airwindows_fx,
+   ct_airwindows_param,
+   ct_airwindows_param_bipolar,
+   ct_airwindows_param_integral,
+   ct_amplitude_clipper,
+   ct_phaser_spread,
    num_ctrltypes,
 };
 
@@ -178,6 +182,10 @@ struct ParameterDiscreteIndexRemapper : public ParamUserData
    virtual std::string nameAtStreamedIndex( int i ) = 0;
    virtual bool hasGroupNames() { return false; }
    virtual std::string groupNameAtStreamedIndex( int i ) { return ""; } // If you want menu grouping
+   virtual bool sortGroupNames() { return true; }
+
+   virtual bool supportsTotalIndexOrdering() { return false; }
+   virtual const std::vector<int> totalIndexOrdering() { return std::vector<int>(); }
 };
 
 /*
@@ -299,6 +307,7 @@ public:
    bool can_setvalue_from_string();
    void clear_flags();
    bool has_portaoptions();
+   bool has_deformoptions();
    void set_type(int ctrltype);
    void morph(Parameter* a, Parameter* b, float x);
    //	void morph(parameter *b, float x);
@@ -364,6 +373,7 @@ public:
    bool temposync{}, extend_range{}, absolute{}, deactivated{};
    bool porta_constrate{}, porta_gliss{}, porta_retrigger{};
    int porta_curve{};
+   int deform_type{};
 
    enum ParamDisplayType {
       Custom,
@@ -413,6 +423,19 @@ public:
    ** if( storage && storage->isStandardTuning ) { }
    */
    SurgeStorage *storage = nullptr;
+
+   /*
+    * These are definitions which surge has used since time immemorial. If you
+    * change them you will break saved automation states in projects, so we stuck
+    * with the somewhat odd 99 and 005 but put them all in one place and used the
+    * consistently.
+    */
+   static inline float intScaledToFloat( int v, int vmax, int vmin = 0 ) {
+      return 0.005 + 0.99 * ((float)(v - vmin)) / ((float)(vmax - vmin));
+   }
+   static inline int intUnscaledFromFloat( float f, int vmax, int vmin = 0 ) {
+      return (int)((1 / 0.99) * (f - 0.005) * (float)(vmax - vmin) + 0.5) + vmin;
+   }
 };
 
 // I don't make this a member since param needs to be copyable with memcpy.

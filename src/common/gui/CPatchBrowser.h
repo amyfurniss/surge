@@ -60,7 +60,7 @@ public:
       {
          std::string s = l;
          // for (int i=0; i<s.length(); i++) s[i] = toupper(s[i]);
-         author = "Creator: " + s;
+         author = "Author: " + s;
       }
       else
          author = "";
@@ -82,7 +82,7 @@ protected:
    /**
     * populatePatchMenuForCategory
     *
-    * recursively builds the nexted patch menu. In the event that one of my childrenis checked, return true so I too can be checked.
+    * recursively builds the nested patch menu. In the event that one of my children is checked, return true so I too can be checked.
     * otherwise, return false.
     */
    bool populatePatchMenuForCategory (int index, VSTGUI::COptionMenu *contextMenu, bool single_category, int &main_e, bool rootCall);

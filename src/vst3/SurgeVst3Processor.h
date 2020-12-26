@@ -14,6 +14,11 @@ using namespace Steinberg;
 class SurgeGUIEditor;
 class SurgeSynthesizer;
 
+namespace VSTGUI
+{
+	class CBitmap;
+}
+
 // we need public EditController, public IAudioProcessor
 class SurgeVst3Processor : public Steinberg::Vst::SingleComponentEffect,
                            public Steinberg::Vst::IMidiMapping
@@ -113,7 +118,11 @@ public:
                        Steinberg::Vst::ParamValue valueNormalized) override;
    tresult endEdit(Steinberg::Vst::ParamID id) override;
 
+   void uithreadIdleActivity();
+
 protected:
+   void setExtraScaleFactor(VSTGUI::CBitmap *bg, float zf);
+
    void createSurge();
    void destroySurge();
 
@@ -125,12 +134,11 @@ protected:
    std::unique_ptr<SurgeSynthesizer> surgeInstance;
    std::set<SurgeGUIEditor*> viewsSet;
    std::map<int, int> beginEditGuard;
-   int blockpos;
+   int blockpos = 0;
 
-   bool disableZoom;
-   bool haveZoomed = false;
-   int lastZoom = -1;
-   void handleZoom(SurgeGUIEditor *e);
+   float lastZoom = -1;
+   void resize(SurgeGUIEditor *e, int width, int heigth);
+   void redraw(SurgeGUIEditor *e, bool resizeWindow);
    
    FpuState _fpuState;
 

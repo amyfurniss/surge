@@ -110,6 +110,11 @@ void Vst2PluginInstance::inputConnected(VstInt32 index, bool state)
 
 Vst2PluginInstance::~Vst2PluginInstance()
 {
+   if( editor )
+   {
+      delete editor;
+      editor = nullptr;
+   }
    delete _instance;
 }
 
@@ -332,7 +337,9 @@ void Vst2PluginInstance::setParameter(VstInt32 index, float value)
    if (!tryInit())
       return;
 
-   _instance->setParameter01(_instance->remapExternalApiToInternalId(index), value, true);
+   SurgeSynthesizer::ID did;
+   if( _instance->fromDAWSideIndex(index, did ))
+      _instance->setParameter01(did, value, true);
 
    // flyttat till sub3_synth
    /*if(editor)
@@ -347,7 +354,11 @@ float Vst2PluginInstance::getParameter(VstInt32 index)
    if (!tryInit())
       return 0;
 
-   return _instance->getParameter01(_instance->remapExternalApiToInternalId(index));
+   SurgeSynthesizer::ID did;
+   if( _instance->fromDAWSideIndex(index, did ))
+      return _instance->getParameter01(did);
+
+   return 0;
 }
 
 void Vst2PluginInstance::getParameterName(VstInt32 index, char* label)
@@ -355,7 +366,10 @@ void Vst2PluginInstance::getParameterName(VstInt32 index, char* label)
    if (!tryInit())
       return;
 
-   _instance->getParameterName(_instance->remapExternalApiToInternalId(index), label);
+   label[0] = 0;
+   SurgeSynthesizer::ID did;
+   if( _instance->fromDAWSideIndex(index, did ))
+      _instance->getParameterName(did, label);
 }
 
 void Vst2PluginInstance::getParameterDisplay(VstInt32 index, char* text)
@@ -363,7 +377,10 @@ void Vst2PluginInstance::getParameterDisplay(VstInt32 index, char* text)
    if (!tryInit())
       return;
 
-   _instance->getParameterDisplay(_instance->remapExternalApiToInternalId(index), text);
+   text[0] = 0;
+   SurgeSynthesizer::ID did;
+   if( _instance->fromDAWSideIndex(index, did ))
+      _instance->getParameterDisplay(did, text);
 }
 
 void Vst2PluginInstance::getParameterLabel(VstInt32 index, char* label)
@@ -617,16 +634,30 @@ VstInt32 Vst2PluginInstance::setChunk(void* data, VstInt32 byteSize, bool isPres
    return 1;
 }
 
+/*
+ * These are both now mapped by the parent to the right ID
+ */
 bool Vst2PluginInstance::beginEdit( VstInt32 index )
 {
-   return AudioEffectX::beginEdit(
-       SurgeGUIEditor::applyParameterOffset(_instance->remapExternalApiToInternalId(index)));
+   int id = index;
+   SurgeSynthesizer::ID did;
+   if( SurgeGUIEditor::fromSynthGUITag(_instance, index, did ) )
+   {
+      id = did.getDawSideIndex();
+   }
+   return AudioEffectX::beginEdit(id);
 }
 
 bool Vst2PluginInstance::endEdit( VstInt32 index )
 {
-   return AudioEffectX::endEdit(
-       SurgeGUIEditor::applyParameterOffset(_instance->remapExternalApiToInternalId(index)));
+   int id = index;
+   SurgeSynthesizer::ID did;
+   if( SurgeGUIEditor::fromSynthGUITag(_instance, index, did ) )
+   {
+      id = did.getDawSideIndex();
+   }
+
+   return AudioEffectX::endEdit(id);
 }
 
 bool Vst2PluginInstance::tryInit()
@@ -674,20 +705,23 @@ bool Vst2PluginInstance::tryInit()
       return false;
    }
 
-   static_cast<SurgeGUIEditor *>(editor)->setZoomCallback( [this](SurgeGUIEditor *e) { handleZoom(e); } );
+   static_cast<SurgeGUIEditor *>(editor)->setZoomCallback( [this](SurgeGUIEditor *e, bool resizeWindow) { redraw(e, resizeWindow); } );
 
    blockpos = 0;
    state = INITIALIZED;
    return true;
 }
 
-void Vst2PluginInstance::handleZoom(SurgeGUIEditor *e)
+void Vst2PluginInstance::redraw(SurgeGUIEditor *e, bool resizeWindow)
 {
-    ERect *vr;
     float fzf = e->getZoomFactor() / 100.0;
-    int newW = e->getWindowSizeX() * fzf;
-    int newH = e->getWindowSizeY() * fzf;
-    sizeWindow( newW, newH );
+    int width = e->getWindowSizeX() * fzf;
+    int heigth = e->getWindowSizeY() * fzf;
+
+    if (resizeWindow)
+    {
+        sizeWindow(width, heigth);
+    }
 
     VSTGUI::CFrame *frame = e->getFrame();
     if(frame)
@@ -698,25 +732,28 @@ void Vst2PluginInstance::handleZoom(SurgeGUIEditor *e)
         ** look at the "oroginWidth" math around in CFrame::setZoom. So rather than let those
         ** drifts accumulate, just reset the size here since we know it
         */
-        frame->setSize(newW, newH);
+        frame->setSize(width, heigth);
 
-        /*
-        ** VST2 has an error which is that the background bitmap doesn't get the frame transform
-        ** applied. Simply look at cviewcontainer::drawBackgroundRect. So we have to force the background
-        ** scale up using a backdoor API.
-        */
-
-        VSTGUI::CBitmap *bg = frame->getBackground();
-        if(bg != NULL)
-        {
-            CScalableBitmap *sbm = dynamic_cast<CScalableBitmap *>(bg); // dynamic casts are gross but better safe
-            if (sbm)
-            {
-               sbm->setExtraScaleFactor(e->getZoomFactor());
-            }
-        }
+		setExtraScaleFactor(frame->getBackground(), e->getZoomFactor());
 
         frame->setDirty(true);
         frame->invalid();
     }
+}
+
+void Vst2PluginInstance::setExtraScaleFactor(VSTGUI::CBitmap *bg, float zf)
+{
+	if (bg != NULL)
+	{
+		auto sbm = dynamic_cast<CScalableBitmap *>(bg); // dynamic casts are gross but better safe
+		if (sbm)
+		{
+			/*
+			** VSTGUI has an error which is that the background bitmap doesn't get the frame transform
+			** applied. Simply look at cviewcontainer::drawBackgroundRect. So we have to force the background
+			** scale up using a backdoor API.
+			*/
+			sbm->setExtraScaleFactor(zf);
+		}
+	}
 }
